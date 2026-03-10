@@ -40,14 +40,14 @@ func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transacti
 }
 
 func (r *TransactionRepository) FindProjectByTransactionOrderID(orderID string) (*models.Project, error) {
-	query := `SELECT p.id, p.nama, p.slug, p.webhook_url, p.api_key 
+	query := `SELECT p.id, p.nama, p.slug, p.webhook_url, p.api_key, p.notifikasi_ke 
 	          FROM projects p 
 	          JOIN transactions t ON p.id = t.project_id 
 	          WHERE t.order_id = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID)
 	var p models.Project
-	err := row.Scan(&p.ID, &p.Nama, &p.Slug, &p.WebhookURL, &p.APIKey)
+	err := row.Scan(&p.ID, &p.Nama, &p.Slug, &p.WebhookURL, &p.APIKey, &p.NotifikasiKe)
 	if err != nil {
 		return nil, err
 	}

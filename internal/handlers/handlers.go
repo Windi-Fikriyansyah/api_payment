@@ -22,6 +22,7 @@ type PaymentHandler struct {
 	AuditLogRepo      *repository.AuditLogRepository
 	PaymentMethodRepo *repository.PaymentMethodRepository
 	WorkerPool        *services.WorkerPool
+	EmailService      *services.EmailService
 	DB                *sql.DB
 }
 
@@ -33,6 +34,7 @@ func NewPaymentHandler(
 	auditLogRepo *repository.AuditLogRepository,
 	paymentMethodRepo *repository.PaymentMethodRepository,
 	workerPool *services.WorkerPool,
+	emailService *services.EmailService,
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
@@ -43,6 +45,7 @@ func NewPaymentHandler(
 		AuditLogRepo:      auditLogRepo,
 		PaymentMethodRepo: paymentMethodRepo,
 		WorkerPool:        workerPool,
+		EmailService:      emailService,
 		DB:                db,
 	}
 }
@@ -165,6 +168,16 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 				})
 			})
 		}
+
+		// 5. Send notification email asynchronously
+		if project != nil && project.NotifikasiKe != "" {
+			h.WorkerPool.Submit(func() {
+				err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
+				if err != nil {
+					fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)
+				}
+			})
+		}
 	} else {
 		// Failure or Pending
 		// We can update status to failed here if it's not success
@@ -234,6 +247,16 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 				PaymentMethod: tx.PaymentMethod,
 				CompletedAt:   time.Now(),
 			})
+		})
+	}
+
+	// Send notification email asynchronously
+	if project != nil && project.NotifikasiKe != "" {
+		h.WorkerPool.Submit(func() {
+			err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
+			if err != nil {
+				fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)
+			}
 		})
 	}
 

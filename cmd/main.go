@@ -32,6 +32,8 @@ func main() {
 	workerPool := services.NewWorkerPool(5) // 5 concurrent workers
 	defer workerPool.Shutdown()
 
+	emailService := services.NewEmailService()
+
 	duitkuService := services.NewDuitkuService(
 		services.DuitkuConfig{
 			MerchantCode: os.Getenv("DUITKU_MERCHANT_CODE"),
@@ -53,6 +55,7 @@ func main() {
 		auditLogRepo,
 		paymentMethodRepo,
 		workerPool,
+		emailService,
 		db,
 	)
 
