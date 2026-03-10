@@ -25,6 +25,11 @@ func main() {
 	// Initialize Repositories
 	projectRepo := repository.NewProjectRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
+	ledgerRepo := repository.NewLedgerRepository(db)
+	auditLogRepo := repository.NewAuditLogRepository(db)
+
+	workerPool := services.NewWorkerPool(5) // 5 concurrent workers
+	defer workerPool.Shutdown()
 
 	duitkuService := services.NewDuitkuService(
 		services.DuitkuConfig{
@@ -38,7 +43,16 @@ func main() {
 			BaseURL:      os.Getenv("DUITKU_PROD_BASE_URL"),
 		},
 	)
-	paymentHandler := handlers.NewPaymentHandler(duitkuService, transactionRepo)
+
+	paymentHandler := handlers.NewPaymentHandler(
+		duitkuService,
+		transactionRepo,
+		projectRepo,
+		ledgerRepo,
+		auditLogRepo,
+		workerPool,
+		db,
+	)
 
 	app := fiber.New()
 	app.Use(logger.New())

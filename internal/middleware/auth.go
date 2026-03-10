@@ -28,6 +28,12 @@ func AuthMiddleware(repo *repository.ProjectRepository) fiber.Handler {
 			})
 		}
 
+		if project.Status != "Aktif" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Project is not active. Current status: " + project.Status,
+			})
+		}
+
 		// Store project in context for later use
 		c.Locals("project", project)
 

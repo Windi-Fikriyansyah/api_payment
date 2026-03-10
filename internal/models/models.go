@@ -31,6 +31,8 @@ type TransactionDetailResponse struct {
 
 type TransactionDetail struct {
 	Amount        float64   `json:"amount"`
+	Fee           float64   `json:"fee"`
+	TotalPayment  float64   `json:"total_payment"`
 	OrderID       string    `json:"order_id"`
 	Project       string    `json:"project"`
 	Status        string    `json:"status"`
@@ -40,6 +42,8 @@ type TransactionDetail struct {
 
 type WebhookPayload struct {
 	Amount        float64   `json:"amount"`
+	Fee           float64   `json:"fee"`
+	NetAmount     float64   `json:"net_amount"`
 	OrderID       string    `json:"order_id"`
 	Project       string    `json:"project"`
 	Status        string    `json:"status"`

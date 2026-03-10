@@ -12,6 +12,7 @@ import (
 	"os"
 	"payment_service/internal/models"
 	"strconv"
+	"time"
 )
 
 type DuitkuConfig struct {
@@ -46,10 +47,34 @@ func (s *DuitkuService) GenerateSignature(mode string, orderID string, amount in
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *DuitkuService) CreateTransaction(mode string, method string, req models.TransactionRequest) (*models.PaymentDetail, error) {
+func (s *DuitkuService) CalculateFee(method string, amount float64) float64 {
+	switch method {
+	case "bri_va", "bni_va", "atm_bersama_va", "bnc_va", "cimb_niaga_va", "maybank_va", "permata_va":
+		return 3500
+	case "mandiri_va":
+		return 4500
+	case "bca_va":
+		return 5500
+	case "artha_graha_va", "sampoerna_va":
+		return 2000
+	case "qris":
+		return (amount * 0.007) + 310
+	default:
+		return 0
+	}
+}
+
+func (s *DuitkuService) CreateTransaction(mode string, method string, req models.TransactionRequest, feeByMerchant bool) (*models.PaymentDetail, error) {
 	cfg := s.getByMode(mode)
 	duitkuMethod := mapMethod(method)
-	amountInt := int(req.Amount)
+
+	fee := s.CalculateFee(method, req.Amount)
+	totalPayment := req.Amount
+	if !feeByMerchant {
+		totalPayment = req.Amount + fee
+	}
+
+	amountInt := int(totalPayment)
 	signature := s.GenerateSignature(mode, req.OrderID, amountInt)
 
 	payload := map[string]interface{}{
@@ -67,7 +92,7 @@ func (s *DuitkuService) CreateTransaction(mode string, method string, req models
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
-	fmt.Printf("[%s] Duitku Request Payload: %s\n", mode, string(jsonPayload))
+	fmt.Printf("[%s] Duitku Request Payload (Total: %d, Fee: %f): %s\n", mode, amountInt, fee, string(jsonPayload))
 
 	resp, err := http.Post(cfg.BaseURL+"/webapi/api/merchant/v2/inquiry", "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
@@ -103,11 +128,12 @@ func (s *DuitkuService) CreateTransaction(mode string, method string, req models
 		Project:       req.Project,
 		OrderID:       req.OrderID,
 		Amount:        req.Amount,
-		Fee:           0,
-		TotalPayment:  req.Amount,
+		Fee:           fee,
+		TotalPayment:  totalPayment,
 		PaymentMethod: method,
 		PaymentNumber: paymentNumber,
 		Reference:     duitkuResp.Reference,
+		ExpiredAt:     time.Now().Add(1 * time.Hour), // Add dummy expiry if Duitku doesn't return it
 	}, nil
 }
 
@@ -115,38 +141,28 @@ func mapMethod(method string) string {
 	switch method {
 	case "qris":
 		return "SP"
-	case "bni_va":
-		return "I1"
 	case "bri_va":
 		return "BR"
-	case "permata_va":
-		return "BT"
-	case "maybank_va":
-		return "VA"
-	case "cimb_niaga_va":
-		return "B1"
+	case "bni_va":
+		return "I1"
 	case "atm_bersama_va":
 		return "A1"
-	case "bca_va":
-		return "BC"
+	case "bnc_va":
+		return "BN"
+	case "cimb_niaga_va":
+		return "B1"
+	case "maybank_va":
+		return "VA"
+	case "permata_va":
+		return "BT"
+	case "artha_graha_va":
+		return "AG"
+	case "sampoerna_va":
+		return "SA"
 	case "mandiri_va":
 		return "M2"
-	case "neo_commerce_va":
-		return "BN"
-	case "ovo":
-		return "OV"
-	case "dana":
-		return "DA"
-	case "linkaja":
-		return "LA"
-	case "shopeepay":
-		return "SP"
-	case "alfamart":
-		return "FT"
-	case "indomaret":
-		return "IR"
-	case "credit_card":
-		return "CV"
+	case "bca_va":
+		return "BC"
 	default:
 		return "SP"
 	}

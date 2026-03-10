@@ -20,9 +20,9 @@ func (r *TransactionRepository) Create(t *models.Transaction) error {
 	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber).Scan(&t.ID)
 }
 
-func (r *TransactionRepository) UpdateStatus(orderID string, status string) error {
+func (r *TransactionRepository) UpdateStatusWithTx(tx *sql.Tx, orderID string, status string) error {
 	query := `UPDATE transactions SET status = $1, updated_at = NOW() WHERE order_id = $2`
-	_, err := r.DB.Exec(query, status, orderID)
+	_, err := tx.Exec(query, status, orderID)
 	return err
 }
 

@@ -64,6 +64,13 @@ PENTING:
    - Selalu panggil API dari server/backend Anda
    - Jaga kerahasiaan API Key Anda
 
+Response jika project tidak aktif:
+
+   HTTP 403
+   {
+       "error": "Project is not active. Current status: Nonaktif"
+   }
+
 Response jika API Key tidak valid:
 
    HTTP 401
@@ -101,22 +108,17 @@ Metode Pembayaran yang Tersedia:
    | Nilai {method}  | Keterangan                    |
    +-----------------+-------------------------------+
    | qris            | QRIS (Scan QR Code)           |
-   | bca_va          | BCA Virtual Account           |
-   | bni_va          | BNI Virtual Account           |
    | bri_va          | BRI Virtual Account           |
+   | bni_va          | BNI Virtual Account           |
    | mandiri_va      | Mandiri Virtual Account       |
-   | permata_va      | Permata Virtual Account       |
-   | maybank_va      | Maybank Virtual Account       |
-   | cimb_niaga_va   | CIMB Niaga Virtual Account    |
-   | neo_commerce_va | Neo Commerce Virtual Account  |
+   | bca_va          | BCA Virtual Account           |
    | atm_bersama_va  | ATM Bersama Virtual Account   |
-   | ovo             | OVO (E-Wallet)                |
-   | dana            | DANA (E-Wallet)               |
-   | linkaja         | LinkAja (E-Wallet)            |
-   | shopeepay       | ShopeePay (E-Wallet)          |
-   | alfamart        | Alfamart (Retail)             |
-   | indomaret       | Indomaret (Retail)            |
-   | credit_card     | Kartu Kredit                  |
+   | bnc_va          | BNC Virtual Account           |
+   | cimb_niaga_va   | CIMB Niaga Virtual Account    |
+   | maybank_va      | Maybank Virtual Account       |
+   | permata_va      | Permata Virtual Account       |
+   | artha_graha_va  | Artha Graha Virtual Account   |
+   | sampoerna_va    | Sampoerna Virtual Account     |
    +-----------------+-------------------------------+
 
 Body (JSON):
@@ -322,10 +324,12 @@ Response Sukses - Sudah Dibayar (HTTP 200):
    {
        "transaction": {
            "amount": 99000,
+           "fee": 3500,
+           "total_payment": 102500,
            "order_id": "INV240910001",
            "project": "depodomain",
            "status": "success",
-           "payment_method": "qris",
+           "payment_method": "bri_va",
            "completed_at": "2026-03-10T19:00:00+07:00"
        }
    }
@@ -343,10 +347,12 @@ Response Sukses - Dibatalkan (HTTP 200):
    }
 
 Penjelasan Field Response:
-   - amount         : (number) Jumlah pembayaran
+   - amount         : (number) Jumlah tagihan dasar (sebelum fee)
+   - fee            : (number) Biaya transaksi yang dikenakan
+   - total_payment  : (number) Total yang dibayar pelanggan (amount + fee)
    - order_id       : (string) ID pesanan Anda
    - project        : (string) Nama project
-   - status         : (string) Status transaksi saat ini
+   - status         : (string) Status transaksi ("pending", "success", "cancelled")
    - payment_method : (string) Metode pembayaran
    - completed_at   : (string) Waktu pembayaran selesai 
                       (hanya muncul jika status "success")
@@ -445,6 +451,8 @@ E.2. Struktur Data Callback
 
    {
        "amount": 99000,
+       "fee": 4500,
+       "net_amount": 94500,
        "order_id": "INV240910001",
        "project": "depodomain",
        "status": "success",
@@ -453,7 +461,9 @@ E.2. Struktur Data Callback
    }
 
    Penjelasan Field:
-   - amount         : (number) Jumlah pembayaran
+   - amount         : (number) Jumlah nominal transaksi asal
+   - fee            : (number) Total biaya transaksi (Duitku + Margin WinLink)
+   - net_amount     : (number) Jumlah bersih yang diterima merchant (setelah potong fee)
    - order_id       : (string) ID pesanan dari sistem Anda
    - project        : (string) Nama project
    - status         : (string) Status terbaru ("success" / "cancelled")
@@ -827,7 +837,7 @@ I. RINGKASAN ENDPOINT
    |  4 | POST   | /api/paymentsimulation                | Simulasi (Sandbox)  |
    +----+--------+--------------------------------------+---------------------+
 
-   Catatan: {method} = qris, bca_va, bni_va, mandiri_va, ovo, alfamart, dll (lihat bagian D.1)
+   Catatan: {method} = qris, bri_va, bni_va, mandiri_va, bca_va, atm_bersama_va, bnc_va, cimb_niaga_va, maybank_va, permata_va, artha_graha_va, sampoerna_va (lihat bagian D.1)
 
 
 ================================================================================
@@ -840,14 +850,53 @@ J. KODE ERROR
    | 200  | OK                  | Request berhasil diproses                   |
    | 400  | Bad Request         | Data request tidak valid atau tidak lengkap  |
    | 401  | Unauthorized        | API Key tidak valid atau tidak disertakan    |
-   | 403  | Forbidden           | Akses ditolak (misal: simulasi di production)|
-   | 404  | Not Found           | Transaksi/data tidak ditemukan              |
-   | 500  | Internal Error      | Terjadi kesalahan pada sistem               |
+   | 403  | Forbidden           | Project tidak aktif atau simulasi di production   |
+   | 404  | Not Found           | Transaksi/data tidak ditemukan                    |
+   | 500  | Internal Error      | Kesalahan sistem (misal: gagal settlement)        |
    +------+---------------------+---------------------------------------------+
 
 
 ================================================================================
-K. TIPS & CATATAN PENTING
+K. SKEMA BIAYA & FEE
+================================================================================
+
+WinLink menerapkan sistem biaya transaksi yang kompetitif. Biaya ini 
+bergantung pada metode pembayaran dan pengaturan project Anda.
+
+K.1. Perhitungan Biaya (Fee)
+-----------------------------
+
+   +--------------------------+------------------------------------------+
+   | Kategori                 | Rumus Perhitungan Fee                    |
+   +--------------------------+------------------------------------------+
+   | QRIS                     | 0,7% + Rp 310                            |
+   | BRI, BNI, ATM Bersama    | Rp 3.500 (Flat)                          |
+   | BNC, CIMB, Maybank, Prmt | Rp 3.500 (Flat)                          |
+   | Mandiri                  | Rp 4.500 (Flat)                          |
+   | BCA                      | Rp 5.500 (Flat)                          |
+   | Artha Graha, Sampoerna   | Rp 2.000 (Flat)                          |
+   +--------------------------+------------------------------------------+
+
+
+K.2. Penanggung Biaya (Fee By Merchant)
+----------------------------------------
+
+   Pengaturan "Fee By Merchant" di dashboard menentukan siapa yang 
+   membayar biaya di atas:
+
+   1. MERCHANT (Aktif / True / 't')
+      - Biaya dipotong langsung dari nominal transaksi.
+      - Pelanggan membayar: Rp 100.000
+      - Merchant menerima: Rp 100.000 - Fee
+
+   2. PELANGGAN (Non-aktif / False / 'f')
+      - Biaya ditambahkan ke total tagihan pelanggan.
+      - Pelanggan membayar: Rp 100.000 + Fee
+      - Merchant menerima: Rp 100.000 (Full)
+
+
+================================================================================
+L. TIPS & CATATAN PENTING
 ================================================================================
 
    1. KEAMANAN API KEY
