@@ -29,3 +29,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_ledgers_project ON ledgers(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_order_id ON transactions(order_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference);
+
+-- 5. Tambahkan Unique Constraint untuk mencegah duplikasi order_id per project
+-- dan memastikan reference unik secara sistem
+ALTER TABLE transactions ADD CONSTRAINT unique_project_order UNIQUE (project_id, order_id);
+ALTER TABLE transactions ADD CONSTRAINT unique_reference UNIQUE (reference);

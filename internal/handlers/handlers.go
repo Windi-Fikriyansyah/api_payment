@@ -107,6 +107,7 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 		MerchantOrderId string `json:"merchantOrderId" form:"merchantOrderId"`
 		Signature       string `json:"signature" form:"signature"`
 		ResultCode      string `json:"resultCode" form:"resultCode"`
+		Reference       string `json:"reference" form:"reference"`
 	}
 
 	if err := c.BodyParser(&payload); err != nil {
@@ -116,6 +117,7 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 		payload.MerchantOrderId = c.FormValue("merchantOrderId")
 		payload.Signature = c.FormValue("signature")
 		payload.ResultCode = c.FormValue("resultCode")
+		payload.Reference = c.FormValue("reference")
 	}
 
 	fmt.Printf("Incoming Webhook: OrderID=%s, Amount=%s, Result=%s\n",
@@ -137,17 +139,17 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 
 	// 3. Process Settlement Atomically
 	if payload.ResultCode == "00" {
-		err = h.ProcessSettlement(payload.MerchantOrderId)
+		err = h.ProcessSettlement(payload.MerchantOrderId, payload.Reference)
 		if err != nil {
 			fmt.Printf("Settlement Error for %s: %v\n", payload.MerchantOrderId, err)
-			return c.Status(500).SendString("Internal Error")
+			return c.Status(200).SendString("RetryLater") // Ask Duitku to retry or just log
 		}
 
-		fmt.Printf("Transaction %s processed successfully\n", payload.MerchantOrderId)
+		fmt.Printf("Transaction %s (Ref: %s) processed successfully\n", payload.MerchantOrderId, payload.Reference)
 
 		// 4. Forward Callback asynchronously
-		tx, _ = h.TransactionRepo.FindByOrderID(payload.MerchantOrderId)
-		project, _ := h.TransactionRepo.FindProjectByTransactionOrderID(payload.MerchantOrderId)
+		tx, _ = h.TransactionRepo.FindByOrderAndReference(payload.MerchantOrderId, payload.Reference)
+		project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(payload.MerchantOrderId, payload.Reference)
 
 		if project != nil && project.WebhookURL != "" {
 			netAmount := tx.Amount
@@ -224,12 +226,12 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 		return c.Status(200).JSON(fiber.Map{"message": "Transaction already paid"})
 	}
 
-	err = h.ProcessSettlement(req.OrderID)
+	err = h.ProcessSettlement(req.OrderID, tx.Reference)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to settle: " + err.Error()})
 	}
 
-	project, _ := h.TransactionRepo.FindProjectByTransactionOrderID(req.OrderID)
+	project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(req.OrderID, tx.Reference)
 	if err == nil && project.WebhookURL != "" {
 		netAmount := tx.Amount
 		if tx.TotalPayment == tx.Amount {
@@ -296,7 +298,7 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 	// Update transaction status in database atomically (partial transaction for status change)
 	dtx, dtxe := h.DB.Begin()
 	if dtxe == nil {
-		h.TransactionRepo.UpdateStatusWithTx(dtx, req.OrderID, "cancelled")
+		h.TransactionRepo.UpdateStatusWithTx(dtx, req.OrderID, tx.Reference, "cancelled")
 		dtx.Commit()
 	}
 
@@ -353,7 +355,7 @@ func (h *PaymentHandler) TransactionDetail(c *fiber.Ctx) error {
 	})
 }
 
-func (h *PaymentHandler) ProcessSettlement(orderID string) error {
+func (h *PaymentHandler) ProcessSettlement(orderID string, reference string) error {
 	// Start Database Transaction
 	tx, err := h.DB.Begin()
 	if err != nil {
@@ -362,7 +364,7 @@ func (h *PaymentHandler) ProcessSettlement(orderID string) error {
 	defer tx.Rollback()
 
 	// 1. Fetch Transaction with Idempotency Check
-	transaction, err := h.TransactionRepo.FindByOrderID(orderID)
+	transaction, err := h.TransactionRepo.FindByOrderAndReference(orderID, reference)
 	if err != nil {
 		return err
 	}
@@ -392,7 +394,7 @@ func (h *PaymentHandler) ProcessSettlement(orderID string) error {
 	afterBalance := beforeBalance + netAmount
 
 	// 4. Update Transaction Status
-	if err := h.TransactionRepo.UpdateStatusWithTx(tx, orderID, "success"); err != nil {
+	if err := h.TransactionRepo.UpdateStatusWithTx(tx, orderID, reference, "success"); err != nil {
 		return fmt.Errorf("failed to update tx status: %v", err)
 	}
 

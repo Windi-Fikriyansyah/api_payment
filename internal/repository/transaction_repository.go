@@ -20,9 +20,9 @@ func (r *TransactionRepository) Create(t *models.Transaction) error {
 	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber).Scan(&t.ID)
 }
 
-func (r *TransactionRepository) UpdateStatusWithTx(tx *sql.Tx, orderID string, status string) error {
-	query := `UPDATE transactions SET status = $1, updated_at = NOW() WHERE order_id = $2`
-	_, err := tx.Exec(query, status, orderID)
+func (r *TransactionRepository) UpdateStatusWithTx(tx *sql.Tx, orderID string, reference string, status string) error {
+	query := `UPDATE transactions SET status = $1, updated_at = NOW() WHERE order_id = $2 AND reference = $3`
+	_, err := tx.Exec(query, status, orderID, reference)
 	return err
 }
 
@@ -39,13 +39,26 @@ func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transacti
 	return &t, nil
 }
 
-func (r *TransactionRepository) FindProjectByTransactionOrderID(orderID string) (*models.Project, error) {
+func (r *TransactionRepository) FindByOrderAndReference(orderID string, reference string) (*models.Transaction, error) {
+	query := `SELECT id, project_id, order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
+	          FROM transactions WHERE order_id = $1 AND reference = $2 LIMIT 1`
+
+	row := r.DB.QueryRow(query, orderID, reference)
+	var t models.Transaction
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *TransactionRepository) FindProjectByTransactionOrderAndReference(orderID string, reference string) (*models.Project, error) {
 	query := `SELECT p.id, p.nama, p.slug, p.webhook_url, p.api_key, p.notifikasi_ke 
 	          FROM projects p 
 	          JOIN transactions t ON p.id = t.project_id 
-	          WHERE t.order_id = $1 LIMIT 1`
+	          WHERE t.order_id = $1 AND t.reference = $2 LIMIT 1`
 
-	row := r.DB.QueryRow(query, orderID)
+	row := r.DB.QueryRow(query, orderID, reference)
 	var p models.Project
 	err := row.Scan(&p.ID, &p.Nama, &p.Slug, &p.WebhookURL, &p.APIKey, &p.NotifikasiKe)
 	if err != nil {
