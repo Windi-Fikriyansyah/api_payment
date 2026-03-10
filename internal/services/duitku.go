@@ -127,6 +127,26 @@ func mapMethod(method string) string {
 		return "B1"
 	case "atm_bersama_va":
 		return "A1"
+	case "bca_va":
+		return "BC"
+	case "mandiri_va":
+		return "M2"
+	case "neo_commerce_va":
+		return "BN"
+	case "ovo":
+		return "OV"
+	case "dana":
+		return "DA"
+	case "linkaja":
+		return "LA"
+	case "shopeepay":
+		return "SP"
+	case "alfamart":
+		return "FT"
+	case "indomaret":
+		return "IR"
+	case "credit_card":
+		return "CV"
 	default:
 		return "SP"
 	}

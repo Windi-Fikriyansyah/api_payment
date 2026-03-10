@@ -1,0 +1,900 @@
+================================================================================
+                    DOKUMENTASI API PAYMENT GATEWAY
+                              WinLink
+================================================================================
+
+Terakhir diperbarui: 10 Maret 2026
+
+
+================================================================================
+A. PENDAHULUAN
+================================================================================
+
+Selamat datang di dokumentasi API WinLink Payment Gateway.
+
+Dokumentasi ini ditujukan untuk merchant yang ingin mengintegrasikan 
+sistem pembayaran WinLink ke dalam website atau aplikasi mereka.
+
+Dengan API ini, Anda dapat:
+   - Membuat transaksi pembayaran (QRIS, Virtual Account)
+   - Menerima notifikasi otomatis saat pembayaran berhasil
+   - Membatalkan transaksi yang belum dibayar
+   - Mengecek status/detail transaksi
+   - Melakukan simulasi pembayaran untuk testing
+
+
+================================================================================
+B. PERSIAPAN
+================================================================================
+
+Sebelum mulai menggunakan API, pastikan Anda telah:
+
+   1. Mendaftar akun di dashboard WinLink
+   2. Membuat project baru
+   3. Mencatat API Key dari halaman detail project
+   4. Mengatur Webhook URL di pengaturan project
+      (URL di server Anda untuk menerima notifikasi pembayaran)
+
+Informasi yang Anda butuhkan:
+   - Base URL   : https://app.WinLink.com
+   - API Key    : Tersedia di halaman detail project Anda
+
+
+================================================================================
+C. AUTENTIKASI
+================================================================================
+
+Semua request API memerlukan API Key untuk autentikasi. 
+API Key dapat dikirimkan melalui salah satu cara berikut:
+
+Cara 1 - Melalui Header (Disarankan):
+
+   X-API-Key: api_key_anda
+
+Cara 2 - Melalui Body JSON:
+
+   {
+       "api_key": "api_key_anda",
+       ...
+   }
+
+PENTING:
+   - Setiap project memiliki API Key yang unik
+   - Jangan pernah meletakkan API Key di kode frontend/client-side
+   - Selalu panggil API dari server/backend Anda
+   - Jaga kerahasiaan API Key Anda
+
+Response jika API Key tidak valid:
+
+   HTTP 401
+   {
+       "error": "Invalid API Key"
+   }
+
+Response jika API Key tidak disertakan:
+
+   HTTP 401
+   {
+       "error": "API Key is required"
+   }
+
+
+================================================================================
+D. DAFTAR API
+================================================================================
+
+
+--------------------------------------------------------------------------------
+D.1. Transaction Create (Membuat Transaksi)
+--------------------------------------------------------------------------------
+
+Gunakan API ini untuk membuat transaksi pembayaran baru.
+
+Method  : POST
+URL     : https://app.WinLink.com/api/transactioncreate/{method}
+
+Parameter URL:
+   {method} - Metode pembayaran yang dipilih pelanggan
+
+Metode Pembayaran yang Tersedia:
+   +-----------------+-------------------------------+
+   | Nilai {method}  | Keterangan                    |
+   +-----------------+-------------------------------+
+   | qris            | QRIS (Scan QR Code)           |
+   | bca_va          | BCA Virtual Account           |
+   | bni_va          | BNI Virtual Account           |
+   | bri_va          | BRI Virtual Account           |
+   | mandiri_va      | Mandiri Virtual Account       |
+   | permata_va      | Permata Virtual Account       |
+   | maybank_va      | Maybank Virtual Account       |
+   | cimb_niaga_va   | CIMB Niaga Virtual Account    |
+   | neo_commerce_va | Neo Commerce Virtual Account  |
+   | atm_bersama_va  | ATM Bersama Virtual Account   |
+   | ovo             | OVO (E-Wallet)                |
+   | dana            | DANA (E-Wallet)               |
+   | linkaja         | LinkAja (E-Wallet)            |
+   | shopeepay       | ShopeePay (E-Wallet)          |
+   | alfamart        | Alfamart (Retail)             |
+   | indomaret       | Indomaret (Retail)            |
+   | credit_card     | Kartu Kredit                  |
+   +-----------------+-------------------------------+
+
+Body (JSON):
+
+   {
+       "project": "nama_project_anda",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "api_key_anda"
+   }
+
+Penjelasan Field Request:
+   - project  : (string, wajib) Nama project Anda di WinLink
+   - order_id : (string, wajib) ID pesanan unik dari sistem Anda
+   - amount   : (number, wajib) Jumlah pembayaran dalam Rupiah
+   - api_key  : (string, wajib) API Key project Anda
+
+Contoh Request (CURL):
+
+   curl -L -X POST 'https://app.WinLink.com/api/transactioncreate/qris' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "xxx123"
+   }'
+
+Contoh Request (PHP):
+
+   $ch = curl_init();
+   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactioncreate/qris');
+   curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+   curl_setopt($ch, CURLOPT_POST, true);
+   curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+   curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+       'project'  => 'depodomain',
+       'order_id' => 'INV240910001',
+       'amount'   => 99000,
+       'api_key'  => 'xxx123'
+   ]));
+   $response = curl_exec($ch);
+   curl_close($ch);
+   
+   $result = json_decode($response, true);
+
+Response Sukses (HTTP 200):
+
+   {
+       "payment": {
+           "project": "depodomain",
+           "order_id": "INV240910001",
+           "amount": 99000,
+           "fee": 0,
+           "total_payment": 99000,
+           "payment_method": "qris",
+           "payment_number": "00020101021226...",
+           "reference": "PK12345678",
+           "expired_at": "2026-03-11T19:00:00+07:00"
+       }
+   }
+
+Penjelasan Field Response:
+   - project        : (string) Nama project
+   - order_id       : (string) ID pesanan Anda
+   - amount         : (number) Jumlah pembayaran asli
+   - fee            : (number) Biaya admin (jika ada)
+   - total_payment  : (number) Total yang harus dibayar pelanggan
+   - payment_method : (string) Metode pembayaran yang dipilih
+   - payment_number : (string) Nomor Virtual Account atau QR String
+   - reference      : (string) Nomor referensi transaksi
+   - expired_at     : (string) Batas waktu pembayaran (format ISO 8601)
+
+Cara Menggunakan Response:
+   - Untuk QRIS     : Gunakan nilai payment_number untuk generate QR Code
+   - Untuk VA       : Tampilkan payment_number sebagai nomor VA ke pelanggan
+   - Simpan reference untuk keperluan tracking
+
+Response Gagal:
+
+   HTTP 400: { "error": "Invalid request body" }
+   HTTP 401: { "error": "Invalid API Key" }
+   HTTP 500: { "error": "Pesan error dari sistem" }
+
+
+--------------------------------------------------------------------------------
+D.2. Transaction Cancel (Membatalkan Transaksi)
+--------------------------------------------------------------------------------
+
+Gunakan API ini untuk membatalkan transaksi yang belum dibayar.
+Hanya transaksi dengan status "pending" yang dapat dibatalkan.
+
+Method  : POST
+URL     : https://app.WinLink.com/api/transactioncancel
+
+Body (JSON):
+
+   {
+       "project": "depodomain",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "xxx123"
+   }
+
+Penjelasan Field Request:
+   - project  : (string, wajib) Nama project Anda
+   - order_id : (string, wajib) ID pesanan yang ingin dibatalkan
+   - amount   : (number, wajib) Jumlah pembayaran
+   - api_key  : (string, wajib) API Key project Anda
+
+Contoh Request (CURL):
+
+   curl -L -X POST 'https://app.WinLink.com/api/transactioncancel' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "xxx123"
+   }'
+
+Contoh Request (PHP):
+
+   $ch = curl_init();
+   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactioncancel');
+   curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+   curl_setopt($ch, CURLOPT_POST, true);
+   curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+   curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+       'project'  => 'depodomain',
+       'order_id' => 'INV240910001',
+       'amount'   => 99000,
+       'api_key'  => 'xxx123'
+   ]));
+   $response = curl_exec($ch);
+   curl_close($ch);
+
+Response Sukses (HTTP 200):
+
+   {
+       "message": "Transaction cancelled"
+   }
+
+Response Gagal:
+
+   HTTP 400: { "error": "Invalid request body" }
+   HTTP 400: { "error": "Transaction cannot be cancelled, current status: success" }
+   HTTP 401: { "error": "Invalid API Key" }
+   HTTP 404: { "error": "Transaction not found" }
+
+Catatan:
+   - Hanya transaksi berstatus "pending" yang bisa dibatalkan
+   - Transaksi yang sudah dibayar (success) TIDAK bisa dibatalkan
+   - Setelah dibatalkan, webhook callback dengan status "cancelled"
+     akan dikirim ke webhook URL Anda
+
+
+--------------------------------------------------------------------------------
+D.3. Transaction Detail (Cek Status Transaksi)
+--------------------------------------------------------------------------------
+
+Gunakan API ini untuk mengecek detail dan status transaksi.
+
+Method  : GET
+URL     : https://app.WinLink.com/api/transactiondetail
+
+Query Parameter:
+   - order_id : (string, wajib) ID pesanan yang ingin dicek
+
+Contoh Request (CURL):
+
+   curl -L 'https://app.WinLink.com/api/transactiondetail?order_id=INV240910001' \
+   -H 'X-API-Key: xxx123'
+
+Contoh Request (PHP):
+
+   $orderID = 'INV240910001';
+   $apiKey  = 'xxx123';
+   
+   $ch = curl_init();
+   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactiondetail?order_id=' . $orderID);
+   curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+   curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-API-Key: ' . $apiKey]);
+   $response = curl_exec($ch);
+   curl_close($ch);
+   
+   $result = json_decode($response, true);
+
+Response Sukses - Status Pending (HTTP 200):
+
+   {
+       "transaction": {
+           "amount": 99000,
+           "order_id": "INV240910001",
+           "project": "depodomain",
+           "status": "pending",
+           "payment_method": "qris"
+       }
+   }
+
+Response Sukses - Sudah Dibayar (HTTP 200):
+
+   {
+       "transaction": {
+           "amount": 99000,
+           "order_id": "INV240910001",
+           "project": "depodomain",
+           "status": "success",
+           "payment_method": "qris",
+           "completed_at": "2026-03-10T19:00:00+07:00"
+       }
+   }
+
+Response Sukses - Dibatalkan (HTTP 200):
+
+   {
+       "transaction": {
+           "amount": 99000,
+           "order_id": "INV240910001",
+           "project": "depodomain",
+           "status": "cancelled",
+           "payment_method": "qris"
+       }
+   }
+
+Penjelasan Field Response:
+   - amount         : (number) Jumlah pembayaran
+   - order_id       : (string) ID pesanan Anda
+   - project        : (string) Nama project
+   - status         : (string) Status transaksi saat ini
+   - payment_method : (string) Metode pembayaran
+   - completed_at   : (string) Waktu pembayaran selesai 
+                      (hanya muncul jika status "success")
+
+Response Gagal:
+
+   HTTP 400: { "error": "order_id is required" }
+   HTTP 401: { "error": "Invalid API Key" }
+   HTTP 404: { "error": "Transaction not found" }
+
+
+--------------------------------------------------------------------------------
+D.4. Payment Simulation (Simulasi Pembayaran - Khusus Sandbox)
+--------------------------------------------------------------------------------
+
+Gunakan API ini untuk mensimulasikan pembayaran saat testing.
+API ini HANYA tersedia untuk project dalam mode SANDBOX.
+
+Method  : POST
+URL     : https://app.WinLink.com/api/paymentsimulation
+
+Body (JSON):
+
+   {
+       "project": "depodomain",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "xxx123"
+   }
+
+Penjelasan Field Request:
+   - project  : (string, wajib) Nama project Anda
+   - order_id : (string, wajib) ID pesanan yang ingin disimulasikan
+   - amount   : (number, wajib) Jumlah pembayaran
+   - api_key  : (string, wajib) API Key project Anda
+
+Contoh Request (CURL):
+
+   curl -L -X POST 'https://app.WinLink.com/api/paymentsimulation' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "INV240910001",
+       "amount": 99000,
+       "api_key": "xxx123"
+   }'
+
+Response Sukses (HTTP 200):
+
+   {
+       "status": "success",
+       "message": "Simulation successful for INV240910001"
+   }
+
+Response Gagal:
+
+   HTTP 200: { "message": "Transaction already paid" }
+   HTTP 401: { "error": "Invalid API Key" }
+   HTTP 403: { "error": "Simulation only available for projects in sandbox mode" }
+   HTTP 404: { "error": "Transaction not found" }
+
+Catatan:
+   - Setelah simulasi berhasil, webhook callback akan otomatis dikirim 
+     ke webhook URL project Anda
+   - Status transaksi akan berubah menjadi "success"
+   - API ini TIDAK tersedia di mode production
+
+
+================================================================================
+E. WEBHOOK CALLBACK
+================================================================================
+
+Webhook adalah cara sistem WinLink memberitahu server Anda bahwa ada 
+perubahan status transaksi. Anda TIDAK perlu memanggil API apapun 
+untuk menerima notifikasi ini — sistem akan otomatis mengirimkannya.
+
+
+E.1. Kapan Callback Dikirim?
+------------------------------
+
+   Callback dikirim saat:
+
+   1. Pembayaran Berhasil
+      Pelanggan berhasil melakukan pembayaran.
+      Status: "success"
+
+   2. Transaksi Dibatalkan
+      Merchant membatalkan transaksi melalui API Transaction Cancel.
+      Status: "cancelled"
+
+
+E.2. Struktur Data Callback
+-----------------------------
+
+   Sistem akan mengirim POST request ke webhook URL Anda dengan body:
+
+   {
+       "amount": 99000,
+       "order_id": "INV240910001",
+       "project": "depodomain",
+       "status": "success",
+       "payment_method": "qris",
+       "completed_at": "2026-03-10T19:07:02+07:00"
+   }
+
+   Penjelasan Field:
+   - amount         : (number) Jumlah pembayaran
+   - order_id       : (string) ID pesanan dari sistem Anda
+   - project        : (string) Nama project
+   - status         : (string) Status terbaru ("success" / "cancelled")
+   - payment_method : (string) Metode pembayaran yang digunakan
+   - completed_at   : (string) Waktu perubahan status (format ISO 8601)
+
+
+E.3. Cara Menerima Callback
+------------------------------
+
+   1. Buat endpoint di server Anda yang menerima POST request
+   2. Daftarkan URL endpoint tersebut sebagai Webhook URL di 
+      pengaturan project pada dashboard WinLink
+   3. Server Anda harus merespons dengan HTTP 200 untuk mengkonfirmasi 
+      penerimaan
+
+   Pastikan:
+   - URL bisa diakses secara publik (bukan localhost)
+   - Menggunakan HTTPS pada mode production
+   - Server aktif 24/7 karena pembayaran bisa terjadi kapan saja
+
+
+E.4. Contoh Penerima Callback (PHP Native)
+--------------------------------------------
+
+   <?php
+   // Terima data callback
+   $payload = json_decode(file_get_contents('php://input'), true);
+   
+   $orderID       = $payload['order_id'];
+   $status        = $payload['status'];
+   $amount        = $payload['amount'];
+   $paymentMethod = $payload['payment_method'];
+   
+   // Proses berdasarkan status
+   if ($status === 'success') {
+       // Pembayaran berhasil!
+       // Update status pesanan di database Anda
+       $pdo->prepare("UPDATE orders SET status = 'paid', 
+                      paid_at = NOW() WHERE order_id = ?")
+           ->execute([$orderID]);
+       
+       // Kirim notifikasi ke pelanggan (opsional)
+       // sendEmailNotification($orderID);
+   }
+   
+   if ($status === 'cancelled') {
+       // Transaksi dibatalkan
+       $pdo->prepare("UPDATE orders SET status = 'cancelled' 
+                      WHERE order_id = ?")
+           ->execute([$orderID]);
+   }
+   
+   // WAJIB: Respons HTTP 200
+   http_response_code(200);
+   echo "OK";
+   ?>
+
+
+E.5. Contoh Penerima Callback (Laravel)
+-----------------------------------------
+
+   // routes/api.php
+   Route::post('/webhook/payment', [WebhookController::class, 'handle']);
+
+   // app/Http/Controllers/WebhookController.php
+   public function handle(Request $request)
+   {
+       $orderID = $request->input('order_id');
+       $status  = $request->input('status');
+       $amount  = $request->input('amount');
+       
+       if ($status === 'success') {
+           DB::table('orders')
+               ->where('order_id', $orderID)
+               ->update([
+                   'status'  => 'paid',
+                   'paid_at' => now()
+               ]);
+       }
+       
+       if ($status === 'cancelled') {
+           DB::table('orders')
+               ->where('order_id', $orderID)
+               ->update(['status' => 'cancelled']);
+       }
+       
+       return response('OK', 200);
+   }
+
+
+E.6. Contoh Penerima Callback (Node.js / Express)
+----------------------------------------------------
+
+   app.post('/webhook/payment', express.json(), (req, res) => {
+       const { order_id, status, amount, payment_method } = req.body;
+       
+       if (status === 'success') {
+           // Update pesanan di database
+           db.query('UPDATE orders SET status = ? WHERE order_id = ?', 
+                     ['paid', order_id]);
+       }
+       
+       if (status === 'cancelled') {
+           db.query('UPDATE orders SET status = ? WHERE order_id = ?', 
+                     ['cancelled', order_id]);
+       }
+       
+       res.status(200).send('OK');
+   });
+
+
+================================================================================
+F. STATUS TRANSAKSI
+================================================================================
+
+Berikut adalah daftar status transaksi dan penjelasannya:
+
+   +------------+-----------------------------------------------------+
+   | Status     | Keterangan                                          |
+   +------------+-----------------------------------------------------+
+   | pending    | Transaksi dibuat, menunggu pembayaran dari pelanggan |
+   | success    | Pembayaran berhasil diterima                        |
+   | cancelled  | Transaksi dibatalkan oleh merchant                  |
+   | failed     | Transaksi gagal diproses                            |
+   | expired    | Melewati batas waktu pembayaran                     |
+   +------------+-----------------------------------------------------+
+
+Diagram Alur Status:
+
+   [pending] ----pembayaran masuk----> [success]
+   [pending] ----dibatalkan merchant-> [cancelled]
+   [pending] ----batas waktu habis---> [expired]
+   [pending] ----gagal diproses------> [failed]
+
+
+================================================================================
+G. ALUR INTEGRASI
+================================================================================
+
+Berikut langkah-langkah untuk mengintegrasikan WinLink ke sistem Anda:
+
+
+G.1. Persiapan (Satu Kali)
+----------------------------
+
+   LANGKAH 1: Daftar & Buat Project
+      - Daftar akun di dashboard WinLink
+      - Buat project baru
+      - Catat API Key Anda
+
+   LANGKAH 2: Siapkan Webhook
+      - Buat endpoint di server Anda untuk menerima callback
+        Contoh: https://toko-anda.com/webhook/payment
+      - Daftarkan URL tersebut di pengaturan project
+
+   LANGKAH 3: Testing di Sandbox
+      - Pastikan project dalam mode "sandbox"
+      - Ikuti alur testing pada bagian H
+
+
+G.2. Alur Transaksi (Setiap Pembayaran)
+------------------------------------------
+
+   +------------------+
+   | 1. Pelanggan      |    Pelanggan memilih produk dan metode 
+   |    checkout       |    pembayaran di website/app Anda
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 2. Server Anda    |    Server Anda memanggil API Transaction Create
+   |    panggil API    |    dengan order_id, amount, dan method
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 3. Terima response |   Simpan data payment dari response
+   |    payment        |    (payment_number, reference, expired_at)
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 4. Tampilkan ke   |    Tampilkan nomor VA atau QR Code
+   |    pelanggan      |    ke pelanggan untuk pembayaran
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 5. Pelanggan      |    Pelanggan melakukan pembayaran
+   |    bayar          |    melalui bank/e-wallet
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 6. Terima webhook |    Server Anda menerima callback
+   |    callback       |    dengan status "success"
+   +--------+---------+
+            |
+            v
+   +------------------+
+   | 7. Proses pesanan |    Update status pesanan, kirim notifikasi
+   |                   |    ke pelanggan, proses pengiriman, dll
+   +------------------+
+
+
+G.3. Contoh Implementasi Lengkap (PHP)
+-----------------------------------------
+
+   // ============================================
+   // HALAMAN CHECKOUT - Membuat Transaksi
+   // ============================================
+   
+   // Data pesanan dari sistem Anda
+   $orderID = 'INV' . date('ymdHis');
+   $amount  = 150000;
+   $method  = 'qris'; // atau bni_va, bri_va, dll
+   
+   // Panggil API Transaction Create
+   $ch = curl_init();
+   curl_setopt($ch, CURLOPT_URL, 
+       'https://app.WinLink.com/api/transactioncreate/' . $method);
+   curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+   curl_setopt($ch, CURLOPT_POST, true);
+   curl_setopt($ch, CURLOPT_HTTPHEADER, [
+       'Content-Type: application/json'
+   ]);
+   curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+       'project'  => 'nama_project_anda',
+       'order_id' => $orderID,
+       'amount'   => $amount,
+       'api_key'  => 'api_key_anda'
+   ]));
+   $response = curl_exec($ch);
+   curl_close($ch);
+   
+   $result = json_decode($response, true);
+   
+   if (isset($result['payment'])) {
+       $payment = $result['payment'];
+       
+       // Simpan ke database
+       $pdo->prepare("INSERT INTO orders (order_id, amount, status, 
+                      payment_method, payment_number, reference, expired_at) 
+                      VALUES (?, ?, 'pending', ?, ?, ?, ?)")
+           ->execute([
+               $orderID,
+               $amount,
+               $payment['payment_method'],
+               $payment['payment_number'],
+               $payment['reference'],
+               $payment['expired_at']
+           ]);
+       
+       // Tampilkan ke pelanggan
+       echo "Silakan lakukan pembayaran:";
+       echo "Metode: " . $payment['payment_method'];
+       echo "Nomor VA/QR: " . $payment['payment_number'];
+       echo "Total: Rp " . number_format($payment['total_payment']);
+       echo "Bayar sebelum: " . $payment['expired_at'];
+   }
+   
+   
+   // ============================================
+   // WEBHOOK ENDPOINT - Terima Notifikasi
+   // ============================================
+   
+   $payload = json_decode(file_get_contents('php://input'), true);
+   
+   if ($payload['status'] === 'success') {
+       $pdo->prepare("UPDATE orders SET status = 'paid', 
+                      paid_at = NOW() WHERE order_id = ?")
+           ->execute([$payload['order_id']]);
+       
+       // Kirim email konfirmasi ke pelanggan
+       // ...
+   }
+   
+   http_response_code(200);
+   echo "OK";
+
+
+================================================================================
+H. PANDUAN TESTING (MODE SANDBOX)
+================================================================================
+
+Sebelum go-live ke production, lakukan testing lengkap di mode sandbox.
+
+
+H.1. Alur Testing Pembayaran
+-------------------------------
+
+   # Langkah 1: Buat transaksi
+   curl -X POST 'https://app.WinLink.com/api/transactioncreate/qris' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "TEST001",
+       "amount": 50000,
+       "api_key": "api_key_anda"
+   }'
+   
+   # Langkah 2: Simulasi pembayaran
+   curl -X POST 'https://app.WinLink.com/api/paymentsimulation' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "TEST001",
+       "amount": 50000,
+       "api_key": "api_key_anda"
+   }'
+   
+   # Langkah 3: Cek status transaksi (harus "success")
+   curl 'https://app.WinLink.com/api/transactiondetail?order_id=TEST001' \
+   -H 'X-API-Key: api_key_anda'
+
+   # Langkah 4: Pastikan webhook callback terkirim ke server Anda
+
+
+H.2. Alur Testing Pembatalan
+-------------------------------
+
+   # Langkah 1: Buat transaksi
+   curl -X POST 'https://app.WinLink.com/api/transactioncreate/bni_va' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "TEST002",
+       "amount": 75000,
+       "api_key": "api_key_anda"
+   }'
+   
+   # Langkah 2: Batalkan transaksi
+   curl -X POST 'https://app.WinLink.com/api/transactioncancel' \
+   -H 'Content-Type: application/json' \
+   -d '{
+       "project": "depodomain",
+       "order_id": "TEST002",
+       "amount": 75000,
+       "api_key": "api_key_anda"
+   }'
+   
+   # Langkah 3: Cek status (harus "cancelled")
+   curl 'https://app.WinLink.com/api/transactiondetail?order_id=TEST002' \
+   -H 'X-API-Key: api_key_anda'
+
+
+H.3. Checklist Testing
+------------------------
+
+   [ ] Buat transaksi dengan semua metode pembayaran
+   [ ] Simulasi pembayaran berhasil
+   [ ] Webhook callback diterima dengan benar di server Anda
+   [ ] Data pesanan terupdate setelah callback diterima
+   [ ] Cancel transaksi pending berhasil
+   [ ] Cancel transaksi yang sudah dibayar ditolak
+   [ ] Cek detail transaksi menampilkan data yang benar
+   [ ] API Key yang salah ditolak (HTTP 401)
+
+
+================================================================================
+I. RINGKASAN ENDPOINT
+================================================================================
+
+   +----+--------+--------------------------------------+---------------------+
+   | No | Method | Endpoint                             | Keterangan          |
+   +----+--------+--------------------------------------+---------------------+
+   |  1 | POST   | /api/transactioncreate/{method}       | Buat Transaksi      |
+   |  2 | POST   | /api/transactioncancel                | Batalkan Transaksi  |
+   |  3 | GET    | /api/transactiondetail?order_id=...   | Cek Detail/Status   |
+   |  4 | POST   | /api/paymentsimulation                | Simulasi (Sandbox)  |
+   +----+--------+--------------------------------------+---------------------+
+
+   Catatan: {method} = qris, bca_va, bni_va, mandiri_va, ovo, alfamart, dll (lihat bagian D.1)
+
+
+================================================================================
+J. KODE ERROR
+================================================================================
+
+   +------+---------------------+---------------------------------------------+
+   | HTTP | Status              | Penjelasan                                  |
+   +------+---------------------+---------------------------------------------+
+   | 200  | OK                  | Request berhasil diproses                   |
+   | 400  | Bad Request         | Data request tidak valid atau tidak lengkap  |
+   | 401  | Unauthorized        | API Key tidak valid atau tidak disertakan    |
+   | 403  | Forbidden           | Akses ditolak (misal: simulasi di production)|
+   | 404  | Not Found           | Transaksi/data tidak ditemukan              |
+   | 500  | Internal Error      | Terjadi kesalahan pada sistem               |
+   +------+---------------------+---------------------------------------------+
+
+
+================================================================================
+K. TIPS & CATATAN PENTING
+================================================================================
+
+   1. KEAMANAN API KEY
+      - Jangan pernah meletakkan API Key di kode frontend (HTML/JavaScript)
+      - Selalu panggil API dari server/backend
+      - Jangan commit API Key ke repository (gunakan environment variable)
+
+   2. ORDER ID
+      - Harus unik untuk setiap transaksi
+      - Disarankan format: PREFIX + TANGGAL + COUNTER
+      - Contoh: INV240910001, ORD20260310A1B2
+
+   3. AMOUNT
+      - Dalam satuan Rupiah (IDR)
+      - Bilangan bulat tanpa desimal
+      - Contoh benar: 99000
+      - Contoh salah: 99000.00 atau 990
+
+   4. WEBHOOK
+      - Pastikan server Anda aktif 24/7
+      - Gunakan HTTPS pada production
+      - Selalu respons HTTP 200 saat menerima callback
+      - Proses callback secara idempotent (jangan proses ulang 
+        pesanan yang sudah diproses)
+
+   5. TESTING
+      - Selalu tes di mode sandbox terlebih dahulu
+      - Gunakan API Payment Simulation untuk test
+      - Pastikan webhook callback berfungsi dengan benar
+      - Tes semua skenario: sukses, cancel, dan error
+
+   6. PRODUCTION
+      - Hubungi tim WinLink untuk mengaktifkan mode production
+      - Pastikan semua testing sudah selesai di sandbox
+      - Gunakan HTTPS untuk semua komunikasi
+
+
+================================================================================
+L. BANTUAN & KONTAK
+================================================================================
+
+Jika Anda mengalami kendala dalam integrasi, silakan hubungi:
+
+   Email   : support@WinLink.com
+   Website : https://app.WinLink.com
+
+
+================================================================================
+                         AKHIR DOKUMENTASI
+================================================================================
