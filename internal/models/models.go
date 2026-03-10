@@ -40,6 +40,28 @@ type TransactionDetail struct {
 	CompletedAt   time.Time `json:"completed_at,omitempty"`
 }
 
+type PaymentMethod struct {
+	ID         uint    `json:"id"`
+	Code       string  `json:"code"`
+	DuitkuCode string  `json:"duitku_code"`
+	Name       string  `json:"name"`
+	ImageURL   string  `json:"image_url"`
+	FeeFlat    float64 `json:"fee_flat"`
+	FeePercent float64 `json:"fee_percent"`
+	IsActive   bool    `json:"is_active"`
+}
+
+type PaymentMethodItem struct {
+	PaymentMethod string  `json:"payment_method"`
+	PaymentName   string  `json:"payment_name"`
+	PaymentImage  string  `json:"payment_image"`
+	TotalFee      float64 `json:"total_fee"`
+}
+
+type PaymentMethodResponse struct {
+	Methods []PaymentMethodItem `json:"methods"`
+}
+
 type WebhookPayload struct {
 	Amount        float64   `json:"amount"`
 	Fee           float64   `json:"fee"`

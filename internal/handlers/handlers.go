@@ -15,13 +15,14 @@ import (
 )
 
 type PaymentHandler struct {
-	Duitku          *services.DuitkuService
-	TransactionRepo *repository.TransactionRepository
-	ProjectRepo     *repository.ProjectRepository
-	LedgerRepo      *repository.LedgerRepository
-	AuditLogRepo    *repository.AuditLogRepository
-	WorkerPool      *services.WorkerPool
-	DB              *sql.DB
+	Duitku            *services.DuitkuService
+	TransactionRepo   *repository.TransactionRepository
+	ProjectRepo       *repository.ProjectRepository
+	LedgerRepo        *repository.LedgerRepository
+	AuditLogRepo      *repository.AuditLogRepository
+	PaymentMethodRepo *repository.PaymentMethodRepository
+	WorkerPool        *services.WorkerPool
+	DB                *sql.DB
 }
 
 func NewPaymentHandler(
@@ -30,17 +31,19 @@ func NewPaymentHandler(
 	projectRepo *repository.ProjectRepository,
 	ledgerRepo *repository.LedgerRepository,
 	auditLogRepo *repository.AuditLogRepository,
+	paymentMethodRepo *repository.PaymentMethodRepository,
 	workerPool *services.WorkerPool,
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
-		Duitku:          duitku,
-		TransactionRepo: transactionRepo,
-		ProjectRepo:     projectRepo,
-		LedgerRepo:      ledgerRepo,
-		AuditLogRepo:    auditLogRepo,
-		WorkerPool:      workerPool,
-		DB:              db,
+		Duitku:            duitku,
+		TransactionRepo:   transactionRepo,
+		ProjectRepo:       projectRepo,
+		LedgerRepo:        ledgerRepo,
+		AuditLogRepo:      auditLogRepo,
+		PaymentMethodRepo: paymentMethodRepo,
+		WorkerPool:        workerPool,
+		DB:                db,
 	}
 }
 
@@ -54,7 +57,16 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	project := c.Locals("project").(*models.Project)
 	req.Project = project.Nama
 
-	payment, err := h.Duitku.CreateTransaction(project.Mode, method, req, project.FeeByMerchant)
+	// Fetch Payment Method from DB
+	pm, err := h.PaymentMethodRepo.FindByCode(method)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Metode pembayaran tidak valid"})
+	}
+
+	// Calculate Fee based on DB
+	fee := pm.FeeFlat + (req.Amount * pm.FeePercent)
+
+	payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -399,4 +411,30 @@ func (h *PaymentHandler) ReconcileTransactions(projectID uint) error {
 	// If successful in Duitku but pending locally, it calls ProcessSettlement
 	fmt.Printf("[Reconciliation] Starting for Project %d\n", projectID)
 	return nil
+}
+
+func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
+	amountStr := c.Query("amount", "0")
+	var amount float64
+	fmt.Sscanf(amountStr, "%f", &amount)
+
+	methods, err := h.PaymentMethodRepo.GetAllActive()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengambil metode pembayaran"})
+	}
+
+	var methodItems []models.PaymentMethodItem
+	for _, m := range methods {
+		totalFee := m.FeeFlat + (amount * m.FeePercent)
+		methodItems = append(methodItems, models.PaymentMethodItem{
+			PaymentMethod: m.Code,
+			PaymentName:   m.Name,
+			PaymentImage:  m.ImageURL,
+			TotalFee:      totalFee,
+		})
+	}
+
+	return c.JSON(models.PaymentMethodResponse{
+		Methods: methodItems,
+	})
 }

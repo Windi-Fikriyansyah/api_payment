@@ -47,28 +47,9 @@ func (s *DuitkuService) GenerateSignature(mode string, orderID string, amount in
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *DuitkuService) CalculateFee(method string, amount float64) float64 {
-	switch method {
-	case "bri_va", "bni_va", "atm_bersama_va", "bnc_va", "cimb_niaga_va", "maybank_va", "permata_va":
-		return 3500
-	case "mandiri_va":
-		return 4500
-	case "bca_va":
-		return 5500
-	case "artha_graha_va", "sampoerna_va":
-		return 2000
-	case "qris":
-		return (amount * 0.007) + 310
-	default:
-		return 0
-	}
-}
-
-func (s *DuitkuService) CreateTransaction(mode string, method string, req models.TransactionRequest, feeByMerchant bool) (*models.PaymentDetail, error) {
+func (s *DuitkuService) CreateTransaction(mode string, duitkuMethod string, fee float64, req models.TransactionRequest, feeByMerchant bool) (*models.PaymentDetail, error) {
 	cfg := s.getByMode(mode)
-	duitkuMethod := mapMethod(method)
 
-	fee := s.CalculateFee(method, req.Amount)
 	totalPayment := req.Amount
 	if !feeByMerchant {
 		totalPayment = req.Amount + fee
@@ -120,7 +101,7 @@ func (s *DuitkuService) CreateTransaction(mode string, method string, req models
 	}
 
 	paymentNumber := duitkuResp.VaNumber
-	if method == "qris" {
+	if duitkuMethod == "SP" {
 		paymentNumber = duitkuResp.QrString
 	}
 
@@ -130,43 +111,14 @@ func (s *DuitkuService) CreateTransaction(mode string, method string, req models
 		Amount:        req.Amount,
 		Fee:           fee,
 		TotalPayment:  totalPayment,
-		PaymentMethod: method,
+		PaymentMethod: duitkuMethod, // Should we use the internal slug or duitku code? Let's use internal slug if passed.
 		PaymentNumber: paymentNumber,
 		Reference:     duitkuResp.Reference,
-		ExpiredAt:     time.Now().Add(1 * time.Hour), // Add dummy expiry if Duitku doesn't return it
+		ExpiredAt:     time.Now().Add(1 * time.Hour),
 	}, nil
 }
 
-func mapMethod(method string) string {
-	switch method {
-	case "qris":
-		return "SP"
-	case "bri_va":
-		return "BR"
-	case "bni_va":
-		return "I1"
-	case "atm_bersama_va":
-		return "A1"
-	case "bnc_va":
-		return "BN"
-	case "cimb_niaga_va":
-		return "B1"
-	case "maybank_va":
-		return "VA"
-	case "permata_va":
-		return "BT"
-	case "artha_graha_va":
-		return "AG"
-	case "sampoerna_va":
-		return "SA"
-	case "mandiri_va":
-		return "M2"
-	case "bca_va":
-		return "BC"
-	default:
-		return "SP"
-	}
-}
+// mapMethod is removed as it's now handled by the database
 
 func (s *DuitkuService) CheckStatus(mode string, project string, orderID string, amount int) (*models.TransactionDetail, error) {
 	// Status API call would go here using cfg.BaseURL/cfg.MerchantCode etc.

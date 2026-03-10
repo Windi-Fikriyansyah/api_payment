@@ -421,6 +421,49 @@ Catatan:
    - API ini TIDAK tersedia di mode production
 
 
+--------------------------------------------------------------------------------
+D.5. Get Payment Methods (Daftar Metode Pembayaran)
+--------------------------------------------------------------------------------
+
+Gunakan API ini untuk mengambil daftar metode pembayaran yang aktif beserta 
+rincian biaya (fee) secara dinamis.
+
+Method  : GET
+URL     : https://app.WinLink.com/api/get_metode_pembayaran
+
+Query Parameter:
+   - amount : (number, opsional) Nominal transaksi untuk menghitung total fee.
+              Jika dikosongkan, total fee dihitung dari base fee.
+
+Contoh Request (CURL):
+
+   curl -L 'https://app.WinLink.com/api/get_metode_pembayaran?amount=100000' \
+   -H 'X-API-Key: xxx123'
+
+Response Sukses (HTTP 200):
+
+   {
+       "methods": [
+           {
+               "payment_method": "qris",
+               "payment_name": "QRIS",
+               "payment_image": "https://app.winlink.com/images/qris.png",
+               "total_fee": 1010
+           },
+           {
+               "payment_method": "bri_va",
+               "payment_name": "BRI Virtual Account",
+               "payment_image": "https://app.winlink.com/images/bri.png",
+               "total_fee": 3500
+           }
+       ]
+   }
+
+Catatan:
+   - Gunakan {payment_method} dari API ini untuk memanggil API Transaction Create.
+   - payment_image berisi URL ikon logo provider pembayaran.
+
+
 ================================================================================
 E. WEBHOOK CALLBACK
 ================================================================================
@@ -835,6 +878,7 @@ I. RINGKASAN ENDPOINT
    |  2 | POST   | /api/transactioncancel                | Batalkan Transaksi  |
    |  3 | GET    | /api/transactiondetail?order_id=...   | Cek Detail/Status   |
    |  4 | POST   | /api/paymentsimulation                | Simulasi (Sandbox)  |
+   |  5 | GET    | /api/get_metode_pembayaran            | Daftar Metode & Fee |
    +----+--------+--------------------------------------+---------------------+
 
    Catatan: {method} = qris, bri_va, bni_va, mandiri_va, bca_va, atm_bersama_va, bnc_va, cimb_niaga_va, maybank_va, permata_va, artha_graha_va, sampoerna_va (lihat bagian D.1)

@@ -27,6 +27,7 @@ func main() {
 	transactionRepo := repository.NewTransactionRepository(db)
 	ledgerRepo := repository.NewLedgerRepository(db)
 	auditLogRepo := repository.NewAuditLogRepository(db)
+	paymentMethodRepo := repository.NewPaymentMethodRepository(db)
 
 	workerPool := services.NewWorkerPool(5) // 5 concurrent workers
 	defer workerPool.Shutdown()
@@ -50,6 +51,7 @@ func main() {
 		projectRepo,
 		ledgerRepo,
 		auditLogRepo,
+		paymentMethodRepo,
 		workerPool,
 		db,
 	)
@@ -65,6 +67,9 @@ func main() {
 
 	// C.2. Transaction create
 	api.Post("/transactioncreate/:method", paymentHandler.CreateTransaction)
+
+	// API Get Payment Methods
+	api.Get("/get_metode_pembayaran", paymentHandler.GetPaymentMethods)
 
 	// C.4. Payment simulation
 	api.Post("/paymentsimulation", paymentHandler.PaymentSimulation)
