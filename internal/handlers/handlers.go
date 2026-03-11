@@ -225,7 +225,7 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 		})
 	}
 
-	tx, err := h.TransactionRepo.FindByOrderID(req.OrderID)
+	tx, err := h.TransactionRepo.FindByProjectAndOrderID(projectFromCtx.ID, req.OrderID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
 	}
@@ -285,8 +285,8 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 
 	project := c.Locals("project").(*models.Project)
 
-	// Find transaction in database
-	tx, err := h.TransactionRepo.FindByOrderID(req.OrderID)
+	// Find transaction in database (filtered by project to prevent affecting other projects)
+	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, req.OrderID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
 	}
