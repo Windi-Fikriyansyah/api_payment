@@ -47,3 +47,27 @@ func (r *PaymentMethodRepository) FindByCode(code string) (*models.PaymentMethod
 	}
 	return &m, nil
 }
+func (r *PaymentMethodRepository) GetByProjectID(projectID uint) ([]models.PaymentMethod, error) {
+	query := `SELECT pm.id, pm.code, pm.duitku_code, pm.name, pm.image_url, pm.fee_flat, pm.fee_percent, pm.is_active 
+	          FROM payment_methods pm
+	          JOIN project_payment_methods ppm ON pm.id = ppm.payment_method_id
+	          WHERE ppm.project_id = $1 AND pm.is_active = TRUE
+	          ORDER BY pm.id ASC`
+
+	rows, err := r.DB.Query(query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var methods []models.PaymentMethod
+	for rows.Next() {
+		var m models.PaymentMethod
+		err := rows.Scan(&m.ID, &m.Code, &m.DuitkuCode, &m.Name, &m.ImageURL, &m.FeeFlat, &m.FeePercent, &m.IsActive)
+		if err != nil {
+			return nil, err
+		}
+		methods = append(methods, m)
+	}
+	return methods, nil
+}

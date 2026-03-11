@@ -452,7 +452,18 @@ func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
 	var amount float64
 	fmt.Sscanf(amountStr, "%f", &amount)
 
-	methods, err := h.PaymentMethodRepo.GetAllActive()
+	var methods []models.PaymentMethod
+	var err error
+
+	project, ok := c.Locals("project").(*models.Project)
+	if ok && project != nil {
+		// If project is authenticated, only show their enabled methods
+		methods, err = h.PaymentMethodRepo.GetByProjectID(project.ID)
+	} else {
+		// Fallback to all globally active methods if no project context
+		methods, err = h.PaymentMethodRepo.GetAllActive()
+	}
+
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Gagal mengambil metode pembayaran"})
 	}

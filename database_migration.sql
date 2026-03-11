@@ -35,3 +35,14 @@ CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference)
 -- dan memastikan reference unik secara sistem
 ALTER TABLE transactions ADD CONSTRAINT unique_project_order UNIQUE (project_id, order_id);
 ALTER TABLE transactions ADD CONSTRAINT unique_reference UNIQUE (reference);
+
+-- 6. Tabel Relasi Project dan Metode Pembayaran (Metode yang diaktifkan merchant)
+CREATE TABLE IF NOT EXISTS project_payment_methods (
+    id SERIAL PRIMARY KEY,
+    project_id INT NOT NULL,
+    payment_method_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, payment_method_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_pm_project ON project_payment_methods(project_id);
