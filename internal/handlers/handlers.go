@@ -69,16 +69,23 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	// Calculate Fee based on DB
 	fee := pm.FeeFlat + (req.Amount * pm.FeePercent)
 
+	// Prefix order_id for Duitku to ensure uniqueness across projects
+	originalOrderID := req.OrderID
+	duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, originalOrderID)
+	req.OrderID = duitkuOrderID
+
 	payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	payment.ExpiredAt = time.Now().Add(24 * time.Hour)
+	payment.OrderID = originalOrderID // Return original ID to merchant in response
 
 	transaction := &models.Transaction{
 		ProjectID:     project.ID,
-		OrderID:       req.OrderID,
+		OrderID:       originalOrderID,
+		DuitkuOrderID: duitkuOrderID,
 		Reference:     payment.Reference,
 		Amount:        req.Amount,
 		Fee:           payment.Fee,
@@ -174,6 +181,7 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 		// 5. Send notification email asynchronously
 		if project != nil && project.NotifikasiKe != "" {
 			h.WorkerPool.Submit(func() {
+				// Use original order ID for email notification
 				err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
 				if err != nil {
 					fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)
@@ -255,6 +263,7 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 	// Send notification email asynchronously
 	if project != nil && project.NotifikasiKe != "" {
 		h.WorkerPool.Submit(func() {
+			// Use original order ID for email notification
 			err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
 			if err != nil {
 				fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)

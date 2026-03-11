@@ -14,25 +14,25 @@ func NewTransactionRepository(db *sql.DB) *TransactionRepository {
 }
 
 func (r *TransactionRepository) Create(t *models.Transaction) error {
-	query := `INSERT INTO transactions (project_id, order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at)
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()) RETURNING id`
+	query := `INSERT INTO transactions (project_id, order_id, duitku_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()) RETURNING id`
 
-	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber).Scan(&t.ID)
+	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.DuitkuOrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber).Scan(&t.ID)
 }
 
 func (r *TransactionRepository) UpdateStatusWithTx(tx *sql.Tx, orderID string, reference string, status string) error {
-	query := `UPDATE transactions SET status = $1, updated_at = NOW() WHERE order_id = $2 AND reference = $3`
+	query := `UPDATE transactions SET status = $1, updated_at = NOW() WHERE (order_id = $2 OR duitku_order_id = $2) AND reference = $3`
 	_, err := tx.Exec(query, status, orderID, reference)
 	return err
 }
 
 func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
-	          FROM transactions WHERE order_id = $1 LIMIT 1`
+	query := `SELECT id, project_id, order_id, duitku_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
+	          FROM transactions WHERE order_id = $1 OR duitku_order_id = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.DuitkuOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -40,12 +40,12 @@ func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transacti
 }
 
 func (r *TransactionRepository) FindByOrderAndReference(orderID string, reference string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
-	          FROM transactions WHERE order_id = $1 AND reference = $2 LIMIT 1`
+	query := `SELECT id, project_id, order_id, duitku_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
+	          FROM transactions WHERE (order_id = $1 OR duitku_order_id = $1) AND reference = $2 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID, reference)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.DuitkuOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *TransactionRepository) FindProjectByTransactionOrderAndReference(orderI
 	query := `SELECT p.id, p.nama, p.slug, p.webhook_url, p.api_key, p.notifikasi_ke 
 	          FROM projects p 
 	          JOIN transactions t ON p.id = t.project_id 
-	          WHERE t.order_id = $1 AND t.reference = $2 LIMIT 1`
+	          WHERE (t.order_id = $1 OR t.duitku_order_id = $1) AND t.reference = $2 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID, reference)
 	var p models.Project
