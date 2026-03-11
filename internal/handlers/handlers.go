@@ -340,7 +340,7 @@ func (h *PaymentHandler) TransactionDetail(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "order_id is required"})
 	}
 
-	tx, err := h.TransactionRepo.FindByOrderID(orderID)
+	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, orderID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
 	}

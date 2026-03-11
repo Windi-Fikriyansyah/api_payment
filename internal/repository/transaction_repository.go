@@ -66,3 +66,16 @@ func (r *TransactionRepository) FindProjectByTransactionOrderAndReference(orderI
 	}
 	return &p, nil
 }
+
+func (r *TransactionRepository) FindByProjectAndOrderID(projectID uint, orderID string) (*models.Transaction, error) {
+	query := `SELECT id, project_id, order_id, duitku_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, created_at, updated_at 
+	          FROM transactions WHERE project_id = $1 AND (order_id = $2 OR duitku_order_id = $2) LIMIT 1`
+
+	row := r.DB.QueryRow(query, projectID, orderID)
+	var t models.Transaction
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.DuitkuOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
