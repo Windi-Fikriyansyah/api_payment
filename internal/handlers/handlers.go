@@ -9,6 +9,7 @@ import (
 	"payment_service/internal/models"
 	"payment_service/internal/repository"
 	"payment_service/internal/services"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -440,6 +441,7 @@ func (h *PaymentHandler) ProcessSettlement(orderID string, reference string) err
 	// Commit Transaction
 	return tx.Commit()
 }
+
 func (h *PaymentHandler) ReconcileTransactions(projectID uint) error {
 	// This would fetch pending transactions from DB and check status via Duitku API
 	// If successful in Duitku but pending locally, it calls ProcessSettlement
@@ -482,4 +484,473 @@ func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
 	return c.JSON(models.PaymentMethodResponse{
 		Methods: methodItems,
 	})
+}
+
+func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
+	slug := c.Params("slug")
+	amountStr := c.Params("amount")
+	orderID := c.Query("order_id")
+	redirect := c.Query("redirect")
+
+	var amount float64
+	fmt.Sscanf(amountStr, "%f", &amount)
+
+	project, err := h.ProjectRepo.FindBySlug(slug)
+	if err != nil {
+		return c.Status(404).SendString("Proyek tidak ditemukan")
+	}
+
+	if project.Status != "Aktif" {
+		return c.Status(403).SendString("Proyek ini sedang tidak aktif")
+	}
+
+	methods, err := h.PaymentMethodRepo.GetByProjectID(project.ID)
+	if err != nil {
+		return c.Status(500).SendString("Gagal mengambil metode pembayaran")
+	}
+
+	// Generate Premium HTML
+	htmlTemplate := `<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pembayaran - {{PROJECT_NAME}}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: 'Outfit', sans-serif; 
+            background: var(--bg); 
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            border-radius: 24px;
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        .header {
+            padding: 32px;
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white;
+            text-align: center;
+        }
+        .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+        .header p { font-size: 14px; opacity: 0.9; }
+        
+        .summary {
+            padding: 24px 32px;
+            background: #f1f5f9;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .summary .amount { font-size: 20px; font-weight: 700; color: var(--primary); }
+        .summary .order-id { font-size: 13px; color: var(--text-muted); }
+
+        .content { padding: 32px; }
+        .section-title { 
+            font-size: 16px; 
+            font-weight: 600; 
+            margin-bottom: 20px; 
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title::before {
+            content: '';
+            display: block;
+            width: 4px;
+            height: 16px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .method-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        .method-card {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            color: inherit;
+        }
+        .method-card:hover {
+            border-color: var(--primary);
+            background: #f5f3ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .method-card img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            margin-right: 16px;
+            filter: grayscale(0.2);
+            transition: filter 0.2s;
+        }
+        .method-card:hover img { filter: grayscale(0); }
+        .method-info { flex: 1; }
+        .method-name { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+        .method-fee { font-size: 12px; color: var(--text-muted); }
+        .chevron { color: var(--border); transition: color 0.2s; }
+        .method-card:hover .chevron { color: var(--primary); }
+
+        .footer {
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <p>Checkout di</p>
+            <h1>{{PROJECT_NAME}}</h1>
+        </div>
+        <div class="summary">
+            <div>
+                <div class="order-id">Order #{{ORDER_ID}}</div>
+                <div class="amount">Rp {{TOTAL_AMOUNT}}</div>
+            </div>
+            <div style="text-align: right">
+                <div class="order-id" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em">Total Tagihan</div>
+            </div>
+        </div>
+        <div class="content">
+            <div class="section-title">Pilih Metode Pembayaran</div>
+            <div class="method-grid">
+                {{METHOD_LIST}}
+            </div>
+        </div>
+        <div class="footer">
+            Powered by Pakasir Payment Gateway
+        </div>
+    </div>
+</body>
+</html>`
+
+	methodList := ""
+	for _, m := range methods {
+		fee := m.FeeFlat + (amount * m.FeePercent)
+		execURL := "/pay/" + slug + "/" + amountStr + "/result?method=" + m.Code + "&order_id=" + orderID + "&redirect=" + redirect
+
+		mCard := `<a href="{{EXEC_URL}}" class="method-card">
+                    <img src="{{IMG_URL}}" alt="{{NAME}}">
+                    <div class="method-info">
+                        <div class="method-name">{{NAME}}</div>
+                        <div class="method-fee">+ Biaya layanan Rp {{FEE}}</div>
+                    </div>
+                    <div class="chevron">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                </a>`
+		mCard = strings.ReplaceAll(mCard, "{{EXEC_URL}}", execURL)
+		mCard = strings.ReplaceAll(mCard, "{{IMG_URL}}", m.ImageURL)
+		mCard = strings.ReplaceAll(mCard, "{{NAME}}", m.Name)
+		mCard = strings.ReplaceAll(mCard, "{{FEE}}", formatRupiah(fee))
+		methodList += mCard
+	}
+
+	html := htmlTemplate
+	html = strings.ReplaceAll(html, "{{PROJECT_NAME}}", project.Nama)
+	html = strings.ReplaceAll(html, "{{ORDER_ID}}", orderID)
+	html = strings.ReplaceAll(html, "{{TOTAL_AMOUNT}}", formatRupiah(amount))
+	html = strings.ReplaceAll(html, "{{METHOD_LIST}}", methodList)
+
+	c.Type("html")
+	return c.SendString(html)
+}
+
+func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
+	slug := c.Params("slug")
+	amountStr := c.Params("amount")
+	method := c.Query("method")
+	orderID := c.Query("order_id")
+	redirect := c.Query("redirect")
+
+	var amount float64
+	fmt.Sscanf(amountStr, "%f", &amount)
+
+	project, err := h.ProjectRepo.FindBySlug(slug)
+	if err != nil {
+		return c.Status(404).SendString("Project not found")
+	}
+
+	pm, err := h.PaymentMethodRepo.FindByCode(method)
+	if err != nil {
+		return c.Status(400).SendString("Metode pembayaran tidak valid")
+	}
+
+	fee := pm.FeeFlat + (amount * pm.FeePercent)
+	duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+
+	req := models.TransactionRequest{
+		Project: project.Nama,
+		OrderID: duitkuOrderID,
+		Amount:  amount,
+		APIKey:  project.APIKey,
+	}
+
+	payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
+	if err != nil {
+		return c.Status(500).SendString("Gagal membuat transaksi: " + err.Error())
+	}
+
+	payment.ExpiredAt = time.Now().Add(24 * time.Hour)
+	payment.OrderID = orderID
+
+	transaction := &models.Transaction{
+		ProjectID:     project.ID,
+		OrderID:       orderID,
+		DuitkuOrderID: duitkuOrderID,
+		Reference:     payment.Reference,
+		Amount:        amount,
+		Fee:           payment.Fee,
+		TotalPayment:  payment.TotalPayment,
+		Status:        "pending",
+		Mode:          project.Mode,
+		PaymentMethod: method,
+		PaymentNumber: payment.PaymentNumber,
+	}
+
+	_ = h.TransactionRepo.Create(transaction)
+
+	// Calculate Dynamic HTML Parts
+	paymentLabel := "Nomor Virtual Account"
+	if method == "qris" {
+		paymentLabel = "Scan kode QR di bawah ini"
+	}
+
+	var paymentInfoHTML string
+	if method == "qris" {
+		paymentInfoHTML = `<div id="qrcode" class="qr-container"></div>
+               <script>
+                var typeNumber = 0;
+                var errorCorrectionLevel = 'L';
+                var qr = qrcode(typeNumber, errorCorrectionLevel);
+                qr.addData('{{QR_DATA}}');
+                qr.make();
+                document.getElementById('qrcode').innerHTML = qr.createImgTag(6);
+               </script>`
+		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{QR_DATA}}", payment.PaymentNumber)
+	} else {
+		paymentInfoHTML = `<div class="payment-number" id="p_num">{{PAY_NUM}}</div>
+           <button class="btn btn-outline" style="padding: 8px; font-size: 12px; width: auto; margin:0 auto;" onclick="copyText('{{PAY_NUM}}')">Salin Nomor</button>`
+		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{PAY_NUM}}", payment.PaymentNumber)
+	}
+
+	var redirectHTML string
+	if redirect != "" {
+		redirectHTML = `<a href="{{REDIRECT_URL}}" class="btn">Kembali ke halaman merchant</a>`
+		redirectHTML = strings.ReplaceAll(redirectHTML, "{{REDIRECT_URL}}", redirect)
+	}
+
+	expiryStr := payment.ExpiredAt.Format("02 Jan 2006, 15:04 WIB")
+
+	htmlTemplate := `<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instruksi Pembayaran - Pakasir</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: 'Outfit', sans-serif; 
+            background: var(--bg); 
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card-bg);
+            border-radius: 24px;
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+        .header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header .status {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #fef3c7;
+            color: #92400e;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .amount-box {
+            padding: 32px;
+            background: #f1f5f9;
+        }
+        .amount-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+        .amount-value { font-size: 32px; font-weight: 700; color: var(--primary); }
+
+        .content { padding: 32px; }
+        .method-info { margin-bottom: 24px; display: flex; align-items: center; justify-content: center; gap: 12px; }
+        .method-info img { width: 40px; height: 40px; object-fit: contain; }
+        .method-info span { font-weight: 600; font-size: 18px; }
+
+        .payment-box {
+            background: #ffffff;
+            border: 2px dashed #cbd5e1;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .payment-number { 
+            font-size: 24px; 
+            font-weight: 700; 
+            letter-spacing: 2px; 
+            color: var(--text-main); 
+            margin: 16px 0;
+            word-break: break-all;
+        }
+        .qr-container { margin: 20px auto; max-width: 200px; }
+        .qr-container img { width: 100%; height: auto; }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 600;
+            transition: opacity 0.2s;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn-outline {
+            background: transparent;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            margin-top: 12px;
+        }
+
+        .expiry { font-size: 13px; color: var(--text-muted); margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="status">Menunggu Pembayaran</div>
+            <div style="font-size: 14px; color: var(--text-muted)">Order #{{ORDER_ID}}</div>
+        </div>
+        <div class="amount-box">
+            <div class="amount-label">Total yang harus dibayar</div>
+            <div class="amount-value">Rp {{TOTAL_PAYMENT}}</div>
+        </div>
+        <div class="content">
+            <div class="method-info">
+                <img src="{{METHOD_IMAGE}}" alt="Logo">
+                <span>{{METHOD_NAME}}</span>
+            </div>
+            
+            <div class="payment-box">
+                <div class="amount-label">{{PAYMENT_LABEL}}</div>
+                {{PAYMENT_INFO}}
+            </div>
+
+            {{REDIRECT_BUTTON}}
+
+            <div class="expiry">
+                Bayar sebelum: <strong>{{EXPIRY}}</strong>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+    </script>
+</body>
+</html>`
+
+	html := htmlTemplate
+	html = strings.ReplaceAll(html, "{{ORDER_ID}}", orderID)
+	html = strings.ReplaceAll(html, "{{TOTAL_PAYMENT}}", formatRupiah(payment.TotalPayment))
+	html = strings.ReplaceAll(html, "{{METHOD_IMAGE}}", pm.ImageURL)
+	html = strings.ReplaceAll(html, "{{METHOD_NAME}}", pm.Name)
+	html = strings.ReplaceAll(html, "{{PAYMENT_LABEL}}", paymentLabel)
+	html = strings.ReplaceAll(html, "{{PAYMENT_INFO}}", paymentInfoHTML)
+	html = strings.ReplaceAll(html, "{{REDIRECT_BUTTON}}", redirectHTML)
+	html = strings.ReplaceAll(html, "{{EXPIRY}}", expiryStr)
+
+	c.Type("html")
+	return c.SendString(html)
+}
+
+func formatRupiah(amount float64) string {
+	s := fmt.Sprintf("%.0f", amount)
+	if len(s) <= 3 {
+		return s
+	}
+	var res string
+	for i, v := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			res += "."
+		}
+		res += string(v)
+	}
+	return res
 }

@@ -86,10 +86,9 @@ func main() {
 	// Webhook from Duitku
 	app.Post("/webhook/duitku", paymentHandler.DuitkuWebhook)
 
-	// Health check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("Payment Service is UP")
-	})
+	// URL-based Integration (Integrasi Via URL)
+	app.Get("/pay/:slug/:amount", paymentHandler.PayByURL)
+	app.Get("/pay/:slug/:amount/result", paymentHandler.PayByURLExec)
 
 	port := os.Getenv("PORT")
 	if port == "" {
