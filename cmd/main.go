@@ -89,6 +89,7 @@ func main() {
 	// URL-based Integration (Integrasi Via URL)
 	app.Get("/pay/:slug/:amount", paymentHandler.PayByURL)
 	app.Get("/pay/:slug/:amount/result", paymentHandler.PayByURLExec)
+	app.Get("/pay/:slug/status/:order_id", paymentHandler.PayByURLStatus)
 
 	port := os.Getenv("PORT")
 	if port == "" {

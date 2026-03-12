@@ -15,6 +15,7 @@ type Transaction struct {
 	Mode          string    `json:"mode"`   // sandbox, production
 	PaymentMethod string    `json:"payment_method"`
 	PaymentNumber string    `json:"payment_number"`
+	Jenis         string    `json:"jenis"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

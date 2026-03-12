@@ -24,7 +24,7 @@ Dengan API ini, Anda dapat:
 
 
 ================================================================================
-B. PERSIAPAN & INTEGRASI URL
+B. PERSIAPAN
 ================================================================================
 
 B.1. Persiapan
@@ -40,33 +40,6 @@ Sebelum mulai menggunakan API, pastikan Anda telah:
 Informasi yang Anda butuhkan:
    - Base URL   : https://app.WinLink.com
    - API Key    : Tersedia di halaman detail project Anda
-
-
-B.2. Integrasi Via URL
-----------------------------
-
-Gunakan metode ini untuk mengarahkan pelanggan langsung ke halaman pembayaran WinLink tanpa perlu koding API yang rumit. 
-
-URL Format:
-https://app.WinLink.com/pay/{slug}/{amount}?order_id={order_id}
-
-Parameter:
-   - slug     : Diambil dari project yang Anda miliki
-   - amount   : Nominal transaksi tanpa titik dan spasi (contoh: 100000 atau 25000)
-   - order_id : ID transaksi/invoice dari sistem Anda (contoh: INV20240910-123456)
-
-Contoh Penggunaan:
-https://app.WinLink.com/pay/depodomain/22000?order_id=240910HDE7C9
-
-Opsi Tambahan:
-1. Custom Redirect
-   Tambahkan parameter redirect=https://websiteanda.com/tujuan untuk menampilkan tombol 
-   [Kembali ke halaman merchant] setelah pembayaran.
-   Contoh: ...?order_id=240910HDE7C9&redirect=https://app.depodomain.com/invoices
-
-2. Pilih Metode Pembayaran
-   Secara default, pelanggan akan diarahkan ke halaman pemilihan metode pembayaran 
-   yang telah Anda aktifkan di proyek Anda.
 
 
 ================================================================================

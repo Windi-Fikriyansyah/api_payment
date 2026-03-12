@@ -141,8 +141,13 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 	// Fetch transaction to see if it exists
 	tx, err := h.TransactionRepo.FindByOrderID(payload.MerchantOrderId)
 	if err != nil {
-		fmt.Printf("Webhook Error: Transaction %s not found in database\n", payload.MerchantOrderId)
+		fmt.Printf("Webhook Error: Transaction %s not found in database: %v\n", payload.MerchantOrderId, err)
 		return c.Status(200).SendString("OK")
+	}
+
+	// Ensure we use the correct reference if available in payload
+	if payload.Reference != "" && tx.Reference == "" {
+		tx.Reference = payload.Reference
 	}
 
 	// 3. Process Settlement Atomically
@@ -159,7 +164,7 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 		tx, _ = h.TransactionRepo.FindByOrderAndReference(payload.MerchantOrderId, payload.Reference)
 		project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(payload.MerchantOrderId, payload.Reference)
 
-		if project != nil && project.WebhookURL != "" {
+		if project != nil && project.WebhookURL != "" && tx.Jenis != "url" {
 			netAmount := tx.Amount
 			if tx.TotalPayment == tx.Amount {
 				netAmount = tx.Amount - tx.Fee
@@ -654,7 +659,7 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
             </div>
         </div>
         <div class="footer">
-            Powered by Pakasir Payment Gateway
+            Powered by LinkBayar Payment Gateway
         </div>
     </div>
 </body>
@@ -663,6 +668,9 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
 	methodList := ""
 	for _, m := range methods {
 		fee := m.FeeFlat + (amount * m.FeePercent)
+		if project.FeeByMerchant {
+			fee = 0
+		}
 		execURL := "/pay/" + slug + "/" + amountStr + "/result?method=" + m.Code + "&order_id=" + orderID + "&redirect=" + redirect
 
 		mCard := `<a href="{{EXEC_URL}}" class="method-card">
@@ -709,53 +717,78 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		return c.Status(404).SendString("Project not found")
 	}
 
-	pm, err := h.PaymentMethodRepo.FindByCode(method)
-	if err != nil {
-		return c.Status(400).SendString("Metode pembayaran tidak valid")
+	// Check if transaction already exists
+	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, orderID)
+	if err != nil && err != sql.ErrNoRows {
+		fmt.Printf("[URL-PAY] Find error: %v\n", err)
 	}
 
-	fee := pm.FeeFlat + (amount * pm.FeePercent)
-	duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+	var currentTx *models.Transaction
+	var pm *models.PaymentMethod
 
-	req := models.TransactionRequest{
-		Project: project.Nama,
-		OrderID: duitkuOrderID,
-		Amount:  amount,
-		APIKey:  project.APIKey,
+	if tx != nil {
+		currentTx = tx
+		pm, _ = h.PaymentMethodRepo.FindByCode(currentTx.PaymentMethod)
+
+		// If transaction exists but fee is 0 and it's pending, try to recalculate it
+		if currentTx.Status == "pending" && currentTx.Fee == 0 && pm != nil {
+			currentTx.Fee = pm.FeeFlat + (currentTx.Amount * pm.FeePercent)
+		}
+	} else {
+		// Create new transaction
+		pm, err = h.PaymentMethodRepo.FindByCode(method)
+		if err != nil {
+			return c.Status(400).SendString("Metode pembayaran tidak valid")
+		}
+
+		fee := pm.FeeFlat + (amount * pm.FeePercent)
+		duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+
+		req := models.TransactionRequest{
+			Project: project.Nama,
+			OrderID: duitkuOrderID,
+			Amount:  amount,
+			APIKey:  project.APIKey,
+		}
+
+		payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
+		if err != nil {
+			fmt.Printf("[URL-PAY] Duitku Create Error: %v\n", err)
+			return c.Status(500).SendString("Gagal membuat transaksi: " + err.Error())
+		}
+
+		currentTx = &models.Transaction{
+			ProjectID:     project.ID,
+			OrderID:       orderID,
+			DuitkuOrderID: duitkuOrderID,
+			Reference:     payment.Reference,
+			Amount:        amount,
+			Fee:           payment.Fee,
+			TotalPayment:  payment.TotalPayment,
+			Status:        "pending",
+			Mode:          project.Mode,
+			PaymentMethod: method,
+			PaymentNumber: payment.PaymentNumber,
+			Jenis:         "url",
+		}
+
+		err = h.TransactionRepo.Create(currentTx)
+		if err != nil {
+			fmt.Printf("[URL-PAY] DB Create Error for %s: %v\n", orderID, err)
+		} else {
+			fmt.Printf("[URL-PAY] Transaction Created: %s (DB ID: %d)\n", orderID, currentTx.ID)
+		}
 	}
-
-	payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
-	if err != nil {
-		return c.Status(500).SendString("Gagal membuat transaksi: " + err.Error())
-	}
-
-	payment.ExpiredAt = time.Now().Add(24 * time.Hour)
-	payment.OrderID = orderID
-
-	transaction := &models.Transaction{
-		ProjectID:     project.ID,
-		OrderID:       orderID,
-		DuitkuOrderID: duitkuOrderID,
-		Reference:     payment.Reference,
-		Amount:        amount,
-		Fee:           payment.Fee,
-		TotalPayment:  payment.TotalPayment,
-		Status:        "pending",
-		Mode:          project.Mode,
-		PaymentMethod: method,
-		PaymentNumber: payment.PaymentNumber,
-	}
-
-	_ = h.TransactionRepo.Create(transaction)
 
 	// Calculate Dynamic HTML Parts
+	isSuccess := currentTx.Status == "success"
 	paymentLabel := "Nomor Virtual Account"
-	if method == "qris" {
+	if currentTx.PaymentMethod == "qris" {
 		paymentLabel = "Scan kode QR di bawah ini"
 	}
 
 	var paymentInfoHTML string
-	if method == "qris" {
+	if currentTx.PaymentMethod == "qris" {
 		paymentInfoHTML = `<div id="qrcode" class="qr-container"></div>
                <script>
                 var typeNumber = 0;
@@ -765,11 +798,11 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
                 qr.make();
                 document.getElementById('qrcode').innerHTML = qr.createImgTag(6);
                </script>`
-		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{QR_DATA}}", payment.PaymentNumber)
+		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{QR_DATA}}", currentTx.PaymentNumber)
 	} else {
 		paymentInfoHTML = `<div class="payment-number" id="p_num">{{PAY_NUM}}</div>
            <button class="btn btn-outline" style="padding: 8px; font-size: 12px; width: auto; margin:0 auto;" onclick="copyText('{{PAY_NUM}}')">Salin Nomor</button>`
-		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{PAY_NUM}}", payment.PaymentNumber)
+		paymentInfoHTML = strings.ReplaceAll(paymentInfoHTML, "{{PAY_NUM}}", currentTx.PaymentNumber)
 	}
 
 	var redirectHTML string
@@ -778,19 +811,33 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		redirectHTML = strings.ReplaceAll(redirectHTML, "{{REDIRECT_URL}}", redirect)
 	}
 
-	expiryStr := payment.ExpiredAt.Format("02 Jan 2006, 15:04 WIB")
+	expiryStr := currentTx.CreatedAt.Add(1 * time.Hour).Format("02 Jan 2006, 15:04 WIB")
+
+	// FIXED FEE LOGIC: Use explicit variables for display
+	displayFee := 0.0
+	totalToPay := currentTx.Amount
+
+	// If merchant doesn't cover the fee, show it in the breakdown and add to total
+	if !project.FeeByMerchant {
+		displayFee = currentTx.Fee
+		totalToPay = currentTx.Amount + currentTx.Fee
+	}
+
+	fmt.Printf("[URL-PAY] OrderID: %s, Subtotal: %f, Fee: %f, FeeByMerc: %v, DisplayFee: %f, Total: %f\n",
+		currentTx.OrderID, currentTx.Amount, currentTx.Fee, project.FeeByMerchant, displayFee, totalToPay)
 
 	htmlTemplate := `<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instruksi Pembayaran - Pakasir</title>
+    <title>{{TITLE}} - LinkBayar</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <style>
         :root {
             --primary: #6366f1;
+            --success: #10b981;
             --bg: #f8fafc;
             --card-bg: #ffffff;
             --text-main: #1e293b;
@@ -810,39 +857,67 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
         }
         .container {
             width: 100%;
-            max-width: 480px;
+            max-width: 440px;
             background: var(--card-bg);
             border-radius: 24px;
             box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
             overflow: hidden;
             border: 1px solid var(--border);
-            text-align: center;
         }
         .header {
-            padding: 24px;
+            padding: 32px 24px;
+            text-align: center;
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            backdrop-filter: blur(4px);
+        }
+
+        .breakdown {
+            padding: 24px 32px;
+            background: #f8fafc;
             border-bottom: 1px solid var(--border);
         }
-        .header .status {
-            display: inline-block;
-            padding: 6px 12px;
-            background: #fef3c7;
-            color: #92400e;
-            border-radius: 99px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 12px;
+        .breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--text-muted);
         }
-        .amount-box {
-            padding: 32px;
-            background: #f1f5f9;
+        .breakdown-item.total {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px dashed var(--border);
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 18px;
         }
-        .amount-label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
-        .amount-value { font-size: 32px; font-weight: 700; color: var(--primary); }
 
-        .content { padding: 32px; }
-        .method-info { margin-bottom: 24px; display: flex; align-items: center; justify-content: center; gap: 12px; }
-        .method-info img { width: 40px; height: 40px; object-fit: contain; }
-        .method-info span { font-weight: 600; font-size: 18px; }
+        .content { padding: 32px; text-align: center; }
+        .method-display {
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 12px;
+            background: #f1f5f9;
+            border-radius: 12px;
+        }
+        .method-display img { width: 32px; height: 32px; object-fit: contain; }
+        .method-display span { font-weight: 600; font-size: 15px; }
 
         .payment-box {
             background: #ffffff;
@@ -859,24 +934,40 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
             margin: 16px 0;
             word-break: break-all;
         }
-        .qr-container { margin: 20px auto; max-width: 200px; }
-        .qr-container img { width: 100%; height: auto; }
+        .qr-container { margin: 10px auto; max-width: 180px; }
+        .qr-container img { width: 100%; height: auto; border-radius: 8px; }
+
+        .success-state {
+            padding: 40px 0;
+        }
+        .success-icon {
+            width: 72px;
+            height: 72px;
+            background: var(--success);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
+        }
 
         .btn {
             display: block;
             width: 100%;
-            padding: 16px;
+            padding: 14px;
             background: var(--primary);
             color: white;
             text-decoration: none;
             border-radius: 12px;
             font-weight: 600;
-            transition: opacity 0.2s;
+            transition: all 0.2s;
             border: none;
             cursor: pointer;
             font-family: inherit;
         }
-        .btn:hover { opacity: 0.9; }
+        .btn:hover { background: #4f46e5; transform: translateY(-1px); }
         .btn-outline {
             background: transparent;
             color: var(--primary);
@@ -884,60 +975,150 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
             margin-top: 12px;
         }
 
-        .expiry { font-size: 13px; color: var(--text-muted); margin-top: 24px; }
+        .footer-note { font-size: 12px; color: var(--text-muted); margin-top: 24px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="status">Menunggu Pembayaran</div>
-            <div style="font-size: 14px; color: var(--text-muted)">Order #{{ORDER_ID}}</div>
-        </div>
-        <div class="amount-box">
-            <div class="amount-label">Total yang harus dibayar</div>
-            <div class="amount-value">Rp {{TOTAL_PAYMENT}}</div>
-        </div>
-        <div class="content">
-            <div class="method-info">
-                <img src="{{METHOD_IMAGE}}" alt="Logo">
-                <span>{{METHOD_NAME}}</span>
-            </div>
-            
-            <div class="payment-box">
-                <div class="amount-label">{{PAYMENT_LABEL}}</div>
-                {{PAYMENT_INFO}}
-            </div>
-
-            {{REDIRECT_BUTTON}}
-
-            <div class="expiry">
-                Bayar sebelum: <strong>{{EXPIRY}}</strong>
-            </div>
-        </div>
+        {{PAGE_CONTENT}}
     </div>
 
     <script>
         function copyText(text) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('Copied to clipboard!');
+                alert('Berhasil disalin!');
             });
         }
+
+        // Auto-refresh when success
+        {{POLLING_SCRIPT}}
     </script>
 </body>
 </html>`
 
-	html := htmlTemplate
-	html = strings.ReplaceAll(html, "{{ORDER_ID}}", orderID)
-	html = strings.ReplaceAll(html, "{{TOTAL_PAYMENT}}", formatRupiah(payment.TotalPayment))
-	html = strings.ReplaceAll(html, "{{METHOD_IMAGE}}", pm.ImageURL)
-	html = strings.ReplaceAll(html, "{{METHOD_NAME}}", pm.Name)
+	var pageContent string
+	if isSuccess {
+		pageContent = `
+        <div class="header" style="background: var(--success);">
+            <div class="success-icon">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            </div>
+            <h1 style="font-size: 22px;">Pembayaran Berhasil!</h1>
+            <p style="font-size: 14px; opacity: 0.9; margin-top: 4px;">Terima kasih telah melakukan pembayaran</p>
+        </div>
+        <div class="content success-state">
+            <div class="breakdown" style="border-radius: 16px; margin-bottom: 32px; text-align: left; border: 1px solid var(--border);">
+                <div class="breakdown-item"><span>Project</span><span style="font-weight: 600;">{{PROJECT_NAME}}</span></div>
+                <div class="breakdown-item"><span>No. Order</span><span>#{{ORDER_ID}}</span></div>
+                <div class="breakdown-item"><span>Metode</span><span>{{METHOD_NAME}}</span></div>
+                <div class="breakdown-item" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
+                    <span>Total Bayar</span>
+                    <span style="color: var(--success); font-weight: 700; font-size: 18px;">Rp {{TOTAL_PAYMENT}}</span>
+                </div>
+            </div>
+            {{REDIRECT_BUTTON}}
+        </div>`
+	} else {
+		pageContent = `
+        <div class="header">
+            <div class="status-badge">Menunggu Pembayaran</div>
+            <h1 style="font-size: 20px;">{{PROJECT_NAME}}</h1>
+            <p style="font-size: 13px; opacity: 0.8; margin-top: 4px;">Order #{{ORDER_ID}}</p>
+        </div>
+        <div class="breakdown">
+            <div class="breakdown-item">
+                <span>Subtotal</span>
+                <span>Rp {{AMOUNT}}</span>
+            </div>
+            <div class="breakdown-item">
+                <span>Biaya Layanan</span>
+                <span>Rp {{FEE}}</span>
+            </div>
+            <div class="breakdown-item total">
+                <span>Total Tagihan</span>
+                <span>Rp {{TOTAL_PAYMENT}}</span>
+            </div>
+        </div>
+        <div class="content">
+            <div class="method-display">
+                {{METHOD_IMG_TAG}}
+                <span>{{METHOD_NAME}}</span>
+            </div>
+            
+            <div class="payment-box">
+                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">{{PAYMENT_LABEL}}</div>
+                {{PAYMENT_INFO}}
+            </div>
+
+            {{REDIRECT_BUTTON}}
+
+            <div class="footer-note">
+                Bayar sebelum: <strong>{{EXPIRY}}</strong><br>
+                <span style="font-size: 10px; opacity: 0.7;">Status akan otomatis diperbarui setelah pembayaran</span>
+            </div>
+        </div>`
+	}
+
+	html := strings.ReplaceAll(htmlTemplate, "{{PAGE_CONTENT}}", pageContent)
+	html = strings.ReplaceAll(html, "{{TITLE}}", cond(isSuccess, "Pembayaran Berhasil", "Instruksi Pembayaran"))
+	html = strings.ReplaceAll(html, "{{PROJECT_NAME}}", project.Nama)
+	html = strings.ReplaceAll(html, "{{ORDER_ID}}", currentTx.OrderID)
+	html = strings.ReplaceAll(html, "{{AMOUNT}}", formatRupiah(currentTx.Amount))
+	html = strings.ReplaceAll(html, "{{FEE}}", formatRupiah(displayFee))
+	html = strings.ReplaceAll(html, "{{TOTAL_PAYMENT}}", formatRupiah(totalToPay))
+	html = strings.ReplaceAll(html, "{{METHOD_NAME}}", cond(pm != nil, pm.Name, currentTx.PaymentMethod))
+	html = strings.ReplaceAll(html, "{{METHOD_IMG_TAG}}", cond(pm != nil, `<img src="`+pm.ImageURL+`" alt="Logo">`, ""))
 	html = strings.ReplaceAll(html, "{{PAYMENT_LABEL}}", paymentLabel)
 	html = strings.ReplaceAll(html, "{{PAYMENT_INFO}}", paymentInfoHTML)
 	html = strings.ReplaceAll(html, "{{REDIRECT_BUTTON}}", redirectHTML)
 	html = strings.ReplaceAll(html, "{{EXPIRY}}", expiryStr)
 
+	// Add Polling Script if pending
+	pollingScript := ""
+	if !isSuccess {
+		pollingScript = `
+        setInterval(function() {
+            fetch('/pay/` + slug + `/status/` + orderID + `')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        window.location.reload();
+                    }
+                });
+        }, 5000);`
+	}
+	html = strings.ReplaceAll(html, "{{POLLING_SCRIPT}}", pollingScript)
+
 	c.Type("html")
 	return c.SendString(html)
+}
+
+func (h *PaymentHandler) PayByURLStatus(c *fiber.Ctx) error {
+	slug := c.Params("slug")
+	orderID := c.Params("order_id")
+
+	project, err := h.ProjectRepo.FindBySlug(slug)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Project not found"})
+	}
+
+	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, orderID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
+	}
+
+	return c.JSON(fiber.Map{
+		"status": tx.Status,
+	})
+}
+
+func cond(c bool, t, f string) string {
+	if c {
+		return t
+	}
+	return f
 }
 
 func formatRupiah(amount float64) string {
