@@ -246,7 +246,7 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 	}
 
 	project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(req.OrderID, tx.Reference)
-	if err == nil && project.WebhookURL != "" {
+	if project != nil && project.WebhookURL != "" {
 		netAmount := tx.Amount
 		if tx.TotalPayment == tx.Amount {
 			netAmount = tx.Amount - tx.Fee
@@ -728,6 +728,33 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 
 	if tx != nil {
 		currentTx = tx
+
+		// If user wants to change payment method for existing pending transaction
+		if currentTx.Status == "pending" && method != "" && method != currentTx.PaymentMethod {
+			newPm, errP := h.PaymentMethodRepo.FindByCode(method)
+			if errP == nil {
+				fee := newPm.FeeFlat + (amount * newPm.FeePercent)
+				req := models.TransactionRequest{
+					Project: project.Nama,
+					OrderID: currentTx.DuitkuOrderID,
+					Amount:  amount,
+					APIKey:  project.APIKey,
+				}
+
+				payment, errD := h.Duitku.CreateTransaction(project.Mode, newPm.DuitkuCode, fee, req, project.FeeByMerchant)
+				if errD == nil {
+					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber)
+					if errU == nil {
+						currentTx.Reference = payment.Reference
+						currentTx.Fee = payment.Fee
+						currentTx.TotalPayment = payment.TotalPayment
+						currentTx.PaymentMethod = method
+						currentTx.PaymentNumber = payment.PaymentNumber
+					}
+				}
+			}
+		}
+
 		pm, _ = h.PaymentMethodRepo.FindByCode(currentTx.PaymentMethod)
 
 		// If transaction exists but fee is 0 and it's pending, try to recalculate it
@@ -809,6 +836,12 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 	if redirect != "" {
 		redirectHTML = `<a href="{{REDIRECT_URL}}" class="btn">Kembali ke halaman merchant</a>`
 		redirectHTML = strings.ReplaceAll(redirectHTML, "{{REDIRECT_URL}}", redirect)
+	}
+
+	backURL := "/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect
+	backHTML := ""
+	if !isSuccess {
+		backHTML = `<a href="` + backURL + `" class="btn btn-outline">Ganti Metode Pembayaran</a>`
 	}
 
 	expiryStr := currentTx.CreatedAt.Add(1 * time.Hour).Format("02 Jan 2006, 15:04 WIB")
@@ -974,6 +1007,9 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
             border: 1px solid var(--primary);
             margin-top: 12px;
         }
+        .btn-outline:hover {
+            color: white;
+        }
 
         .footer-note { font-size: 12px; color: var(--text-muted); margin-top: 24px; }
     </style>
@@ -1053,6 +1089,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
             </div>
 
             {{REDIRECT_BUTTON}}
+            {{BACK_BUTTON}}
 
             <div class="footer-note">
                 Bayar sebelum: <strong>{{EXPIRY}}</strong><br>
@@ -1073,6 +1110,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 	html = strings.ReplaceAll(html, "{{PAYMENT_LABEL}}", paymentLabel)
 	html = strings.ReplaceAll(html, "{{PAYMENT_INFO}}", paymentInfoHTML)
 	html = strings.ReplaceAll(html, "{{REDIRECT_BUTTON}}", redirectHTML)
+	html = strings.ReplaceAll(html, "{{BACK_BUTTON}}", backHTML)
 	html = strings.ReplaceAll(html, "{{EXPIRY}}", expiryStr)
 
 	// Add Polling Script if pending

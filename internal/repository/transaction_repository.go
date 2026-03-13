@@ -79,3 +79,8 @@ func (r *TransactionRepository) FindByProjectAndOrderID(projectID uint, orderID 
 	}
 	return &t, nil
 }
+func (r *TransactionRepository) UpdatePaymentMethod(id uint, reference string, fee float64, totalPayment float64, method string, paymentNumber string) error {
+	query := `UPDATE transactions SET reference = $1, fee = $2, total_payment = $3, payment_method = $4, payment_number = $5, updated_at = NOW() WHERE id = $6`
+	_, err := r.DB.Exec(query, reference, fee, totalPayment, method, paymentNumber, id)
+	return err
+}
