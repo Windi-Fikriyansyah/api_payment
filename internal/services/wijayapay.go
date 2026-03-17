@@ -91,7 +91,7 @@ func (s *WijayaPayService) CreateTransaction(mode string, gatewayMethod string, 
 	}
 
 	if !wijayaResp.Success {
-		return nil, fmt.Errorf("WijayaPay Error: %s", wijayaResp.Message)
+		return nil, fmt.Errorf("%s", wijayaResp.Message)
 	}
 
 	paymentNumber := wijayaResp.Data.NomorVa
