@@ -59,7 +59,7 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	}
 
 	project := c.Locals("project").(*models.Project)
-	
+
 	// Security: Validate project name matches
 	if req.Project != project.Nama {
 		return c.Status(401).JSON(fiber.Map{"error": "Project name mismatch"})
@@ -112,6 +112,16 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 }
 
 func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
+	// IP Whitelisting Security
+	clientIP := c.IP()
+	allowedIP := "45.158.126.118"
+
+	// Allow WijayaPay IP or localhost (for sandbox simulation)
+	if clientIP != allowedIP && clientIP != "127.0.0.1" && clientIP != "::1" {
+		fmt.Printf("Blocked Unauthorized IP: %s\n", clientIP)
+		return c.Status(403).SendString("Unauthorized IP Source")
+	}
+
 	// WijayaPay callback structure
 	var payload struct {
 		Status string `json:"status"` // e.g. "paid"
