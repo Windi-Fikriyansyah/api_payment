@@ -779,17 +779,21 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 			newPm, errP := h.PaymentMethodRepo.FindByCode(method)
 			if errP == nil {
 				fee := newPm.FeeFlat + (amount * newPm.FeePercent)
+				// Generate a NEW unique gateway order ID for this change attempt
+				newGatewayOrderID := fmt.Sprintf("P%d-%s-C%d", project.ID, orderID, time.Now().Unix())
+
 				req := models.TransactionRequest{
 					Project: project.Nama,
-					OrderID: currentTx.GatewayOrderID,
+					OrderID: newGatewayOrderID,
 					Amount:  amount,
 					APIKey:  project.APIKey,
 				}
 
 				payment, errD := h.WijayaPay.CreateTransaction(project.Mode, newPm.GatewayCode, fee, req, project.FeeByMerchant)
 				if errD == nil {
-					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber)
+					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, newGatewayOrderID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber)
 					if errU == nil {
+						currentTx.GatewayOrderID = newGatewayOrderID
 						currentTx.Reference = payment.Reference
 						currentTx.Fee = payment.Fee
 						currentTx.TotalPayment = payment.TotalPayment

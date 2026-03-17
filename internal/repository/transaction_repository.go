@@ -79,8 +79,8 @@ func (r *TransactionRepository) FindByProjectAndOrderID(projectID uint, orderID 
 	}
 	return &t, nil
 }
-func (r *TransactionRepository) UpdatePaymentMethod(id uint, reference string, fee float64, totalPayment float64, method string, paymentNumber string) error {
-	query := `UPDATE transactions SET reference = $1, fee = $2, total_payment = $3, payment_method = $4, payment_number = $5, updated_at = NOW() WHERE id = $6`
-	_, err := r.DB.Exec(query, reference, fee, totalPayment, method, paymentNumber, id)
+func (r *TransactionRepository) UpdatePaymentMethod(id uint, gatewayOrderID string, reference string, fee float64, totalPayment float64, method string, paymentNumber string) error {
+	query := `UPDATE transactions SET gateway_order_id = $1, reference = $2, fee = $3, total_payment = $4, payment_method = $5, payment_number = $6, updated_at = NOW() WHERE id = $7`
+	_, err := r.DB.Exec(query, gatewayOrderID, reference, fee, totalPayment, method, paymentNumber, id)
 	return err
 }
