@@ -1,9 +1,9 @@
 ================================================================================
                     DOKUMENTASI API PAYMENT GATEWAY
-                              WinLink
+                              LinkBayar
 ================================================================================
 
-Terakhir diperbarui: 10 Maret 2026
+Terakhir diperbarui: 17 Maret 2026
 
 
 ================================================================================
@@ -38,7 +38,7 @@ Sebelum mulai menggunakan API, pastikan Anda telah:
    4. Mengatur Webhook URL di pengaturan project
 
 Informasi yang Anda butuhkan:
-   - Base URL   : https://app.WinLink.com
+   - Base URL   : http://localhost:3005
    - API Key    : Tersedia di halaman detail project Anda
 
 
@@ -100,7 +100,7 @@ D.1. Transaction Create (Membuat Transaksi)
 Gunakan API ini untuk membuat transaksi pembayaran baru.
 
 Method  : POST
-URL     : https://app.WinLink.com/api/transactioncreate/{method}
+URL     : http://localhost:3005/api/transactioncreate/{method}
 
 Parameter URL:
    {method} - Metode pembayaran yang dipilih pelanggan
@@ -214,7 +214,7 @@ Gunakan API ini untuk membatalkan transaksi yang belum dibayar.
 Hanya transaksi dengan status "pending" yang dapat dibatalkan.
 
 Method  : POST
-URL     : https://app.WinLink.com/api/transactioncancel
+URL     : http://localhost:3005/api/transactioncancel
 
 Body (JSON):
 
@@ -285,7 +285,7 @@ D.3. Transaction Detail (Cek Status Transaksi)
 Gunakan API ini untuk mengecek detail dan status transaksi.
 
 Method  : GET
-URL     : https://app.WinLink.com/api/transactiondetail
+URL     : http://localhost:3005/api/transactiondetail
 
 Query Parameter:
    - order_id : (string, wajib) ID pesanan yang ingin dicek
@@ -374,7 +374,7 @@ Gunakan API ini untuk mensimulasikan pembayaran saat testing.
 API ini HANYA tersedia untuk project dalam mode SANDBOX.
 
 Method  : POST
-URL     : https://app.WinLink.com/api/paymentsimulation
+URL     : http://localhost:3005/api/paymentsimulation
 
 Body (JSON):
 
@@ -430,7 +430,7 @@ D.5. Get Payment Methods (Daftar Metode Pembayaran)
 Gunakan API ini untuk mengambil daftar metode pembayaran yang aktif.
 
 Method  : GET
-URL     : https://app.WinLink.com/api/get_metode_pembayaran
+URL     : http://localhost:3005/api/get_metode_pembayaran
 
 Query Parameter (Opsional):
    - amount : (number) Nominal transaksi untuk menghitung total fee secara otomatis.
@@ -472,7 +472,7 @@ Catatan:
 E. WEBHOOK CALLBACK
 ================================================================================
 
-Webhook adalah cara sistem WijayaPay memberitahu server Anda bahwa ada 
+Webhook adalah cara sistem iPaymu memberitahu server Anda bahwa ada 
 perubahan status transaksi. Anda TIDAK perlu memanggil API apapun 
 untuk menerima notifikasi ini — sistem akan otomatis mengirimkannya.
 
@@ -503,8 +503,8 @@ E.2. Struktur Data Callback
        "order_id": "INV240910001",
        "project": "depodomain",
        "status": "success",
-       "payment_method": "qris",
-       "completed_at": "2026-03-10T19:07:02+07:00"
+       "payment_method": "bri_va",
+       "completed_at": "2026-03-17T11:07:02Z"
    }
 
    Penjelasan Field:
@@ -804,7 +804,7 @@ H.1. Alur Testing Pembayaran
 -------------------------------
 
    # Langkah 1: Buat transaksi
-   curl -X POST 'https://app.WinLink.com/api/transactioncreate/qris' \
+   curl -X POST 'http://localhost:3005/api/transactioncreate/qris' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -814,7 +814,7 @@ H.1. Alur Testing Pembayaran
    }'
    
    # Langkah 2: Simulasi pembayaran
-   curl -X POST 'https://app.WinLink.com/api/paymentsimulation' \
+   curl -X POST 'http://localhost:3005/api/paymentsimulation' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -824,7 +824,7 @@ H.1. Alur Testing Pembayaran
    }'
    
    # Langkah 3: Cek status transaksi (harus "success")
-   curl 'https://app.WinLink.com/api/transactiondetail?order_id=TEST001' \
+   curl 'http://localhost:3005/api/transactiondetail?order_id=TEST001' \
    -H 'X-API-Key: api_key_anda'
 
    # Langkah 4: Pastikan webhook callback terkirim ke server Anda
@@ -844,7 +844,7 @@ H.2. Alur Testing Pembatalan
    }'
    
    # Langkah 2: Batalkan transaksi
-   curl -X POST 'https://app.WinLink.com/api/transactioncancel' \
+   curl -X POST 'http://localhost:3005/api/transactioncancel' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -854,7 +854,7 @@ H.2. Alur Testing Pembatalan
    }'
    
    # Langkah 3: Cek status (harus "cancelled")
-   curl 'https://app.WinLink.com/api/transactiondetail?order_id=TEST002' \
+   curl 'http://localhost:3005/api/transactiondetail?order_id=TEST002' \
    -H 'X-API-Key: api_key_anda'
 
 

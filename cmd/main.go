@@ -34,16 +34,16 @@ func main() {
 
 	emailService := services.NewEmailService()
 
-	wijayaPayService := services.NewWijayaPayService(
-		services.WijayaPayConfig{
-			MerchantCode: os.Getenv("WIJAYAPAY_MERCHANT_CODE"),
-			APIKey:       os.Getenv("WIJAYAPAY_API_KEY"),
-			BaseURL:      os.Getenv("WIJAYAPAY_BASE_URL"),
+	ipaymuService := services.NewIPaymuService(
+		services.IPaymuConfig{
+			Va:      os.Getenv("IPAYMU_VA"),
+			APIKey:  os.Getenv("IPAYMU_API_KEY"),
+			BaseURL: os.Getenv("IPAYMU_BASE_URL"),
 		},
 	)
 
 	paymentHandler := handlers.NewPaymentHandler(
-		wijayaPayService,
+		ipaymuService,
 		transactionRepo,
 		projectRepo,
 		ledgerRepo,
@@ -78,8 +78,8 @@ func main() {
 	// E. Transaction Detail API
 	api.Get("/transactiondetail", paymentHandler.TransactionDetail)
 
-	// Webhook from WijayaPay
-	app.Post("/webhook/wijayapay", paymentHandler.WijayaPayWebhook)
+	// Webhook from iPaymu
+	app.Post("/webhook/ipaymu", paymentHandler.IPaymuWebhook)
 
 	// URL-based Integration (Integrasi Via URL)
 	app.Get("/pay/:slug/:amount", paymentHandler.PayByURL)

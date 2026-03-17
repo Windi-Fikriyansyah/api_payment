@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seeder Data (Sesuai tarif WijayaPay)
+-- Seeder Data (Sesuai tarif iPaymu)
 INSERT INTO payment_methods (code, gateway_code, name, fee_flat, fee_percent, image_url) VALUES
 ('qris', 'QRIS', 'QRIS', 0, 0.0070, 'https://app.winlink.com/images/qris.png'),
 ('bri_va', 'BRIVA', 'BRI Virtual Account', 3500, 0, 'https://app.winlink.com/images/bri.png'),
