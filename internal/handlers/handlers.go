@@ -9,6 +9,7 @@ import (
 	"payment_service/internal/models"
 	"payment_service/internal/repository"
 	"payment_service/internal/services"
+	"net/url"
 	"strings"
 	"time"
 
@@ -696,6 +697,16 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
             Powered by LinkBayar Payment Gateway
         </div>
     </div>
+    <script>
+        // Show error alert if exists
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('error')) {
+            alert("Gagal membuat transaksi: " + urlParams.get('error'));
+            // Remove error from URL without refreshing
+            const newUrl = window.location.pathname + window.location.search.replace(/[?&]error=[^&]+/, '').replace(/^&/, '?');
+            window.history.replaceState({}, document.title, newUrl);
+        }
+    </script>
 </body>
 </html>`
 
@@ -785,6 +796,10 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 						currentTx.PaymentMethod = method
 						currentTx.PaymentNumber = payment.PaymentNumber
 					}
+				} else {
+					// Redirect back with error message
+					errMsg := url.QueryEscape(errD.Error())
+					return c.Redirect("/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect + "&error=" + errMsg)
 				}
 			}
 		}
@@ -815,7 +830,9 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		payment, err := h.WijayaPay.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
 		if err != nil {
 			fmt.Printf("[URL-PAY] WijayaPay Create Error: %v\n", err)
-			return c.Status(500).SendString("Gagal membuat transaksi: " + err.Error())
+			// Redirect back with error message as alert
+			errMsg := url.QueryEscape(err.Error())
+			return c.Redirect("/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect + "&error=" + errMsg)
 		}
 
 		currentTx = &models.Transaction{
