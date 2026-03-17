@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -153,18 +152,13 @@ func (s *WijayaPayService) createSandboxTransaction(gatewayMethod string, fee fl
 	}, nil
 }
 
-func (s *WijayaPayService) VerifyCallback(orderID string, totalBayar string, signature string) error {
+func (s *WijayaPayService) VerifyCallback(orderID string, signature string) error {
 	expected := s.GenerateSignature(s.Config.MerchantCode, s.Config.APIKey, orderID)
 	if signature == expected {
 		return nil
 	}
-	// Also check signature for Sandbox just in case
-	sandboxExpected := s.GenerateSignature(s.Config.MerchantCode, s.Config.APIKey, orderID)
-	if signature == sandboxExpected {
-		return nil
-	}
 	
-	return errors.New("invalid signature")
+	return fmt.Errorf("invalid signature. expected: %s, got: %s", expected, signature)
 }
 
 func (s *WijayaPayService) CancelTransaction(mode string, req models.TransactionRequest) error {

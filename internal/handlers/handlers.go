@@ -123,18 +123,21 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 		return c.Status(403).SendString("Unauthorized IP Source")
 	}
 
-	// WijayaPay callback structure
+	// WijayaPay callback structure based on latest documentation
 	var payload struct {
 		Status string `json:"status"` // e.g. "paid"
 		Data   struct {
-			RefID        string `json:"ref_id"`
-			TrxReference string `json:"trx_reference"`
-			Nominal      string `json:"nominal"`
+			RefID          string  `json:"ref_id"`
+			TrxReference   string  `json:"trx_reference"`
+			TotalDibayar   float64 `json:"total_dibayar"`
+			PaymentMethode string  `json:"payment_methode"`
+			UpdatedAt      string  `json:"updated_at"`
 		} `json:"data"`
 	}
 
 	if err := c.BodyParser(&payload); err != nil {
-		return c.Status(400).SendString("Invalid payload")
+		fmt.Printf("Webhook Parsing Error: %v\n", err)
+		return c.Status(400).JSON(fiber.Map{"status": false})
 	}
 
 	signature := c.Get("X-Signature")
@@ -142,17 +145,21 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 	fmt.Printf("Incoming WijayaPay Webhook: OrderID=%s, Status=%s\n",
 		payload.Data.RefID, payload.Status)
 
-	// Verify Signature
-	err := h.WijayaPay.VerifyCallback(payload.Data.RefID, payload.Data.Nominal, signature)
+	// Verify Signature (md5 of code_merchant + api_key + ref_id)
+	err := h.WijayaPay.VerifyCallback(payload.Data.RefID, signature)
 	if err != nil {
 		fmt.Printf("Webhook Signature Invalid: %v\n", err)
-		return c.Status(400).SendString("Invalid signature")
+		// Return true anyway if signature check failed to stop retries if desired, 
+		// but typically we return false or error if we want them to retry. 
+		// However, the doc says "wajib mengembalikan response {"status": true}"
+		return c.Status(200).JSON(fiber.Map{"status": true})
 	}
 
 	// Fetch transaction to see if it exists
 	tx, err := h.TransactionRepo.FindByOrderID(payload.Data.RefID)
 	if err != nil {
 		fmt.Printf("Webhook Error: Transaction %s not found in database: %v\n", payload.Data.RefID, err)
+		// Return true as per requirement to stop retries for non-existent orders
 		return c.Status(200).JSON(fiber.Map{"status": true})
 	}
 
