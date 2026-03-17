@@ -16,7 +16,7 @@ import (
 )
 
 type PaymentHandler struct {
-	Duitku            *services.DuitkuService
+	WijayaPay         *services.WijayaPayService
 	TransactionRepo   *repository.TransactionRepository
 	ProjectRepo       *repository.ProjectRepository
 	LedgerRepo        *repository.LedgerRepository
@@ -28,7 +28,7 @@ type PaymentHandler struct {
 }
 
 func NewPaymentHandler(
-	duitku *services.DuitkuService,
+	wijayaPay *services.WijayaPayService,
 	transactionRepo *repository.TransactionRepository,
 	projectRepo *repository.ProjectRepository,
 	ledgerRepo *repository.LedgerRepository,
@@ -39,7 +39,7 @@ func NewPaymentHandler(
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
-		Duitku:            duitku,
+		WijayaPay:         wijayaPay,
 		TransactionRepo:   transactionRepo,
 		ProjectRepo:       projectRepo,
 		LedgerRepo:        ledgerRepo,
@@ -59,7 +59,11 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	}
 
 	project := c.Locals("project").(*models.Project)
-	req.Project = project.Nama
+	
+	// Security: Validate project name matches
+	if req.Project != project.Nama {
+		return c.Status(401).JSON(fiber.Map{"error": "Project name mismatch"})
+	}
 
 	// Fetch Payment Method from DB
 	pm, err := h.PaymentMethodRepo.FindByCode(method)
@@ -70,12 +74,12 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	// Calculate Fee based on DB
 	fee := pm.FeeFlat + (req.Amount * pm.FeePercent)
 
-	// Prefix order_id for Duitku to ensure uniqueness across projects
+	// Prefix order_id for Gateway to ensure uniqueness across projects
 	originalOrderID := req.OrderID
-	duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, originalOrderID)
-	req.OrderID = duitkuOrderID
+	gatewayOrderID := fmt.Sprintf("P%d-%s", project.ID, originalOrderID)
+	req.OrderID = gatewayOrderID
 
-	payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
+	payment, err := h.WijayaPay.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -84,17 +88,17 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	payment.OrderID = originalOrderID // Return original ID to merchant in response
 
 	transaction := &models.Transaction{
-		ProjectID:     project.ID,
-		OrderID:       originalOrderID,
-		DuitkuOrderID: duitkuOrderID,
-		Reference:     payment.Reference,
-		Amount:        req.Amount,
-		Fee:           payment.Fee,
-		TotalPayment:  payment.TotalPayment,
-		Status:        "pending",
-		Mode:          project.Mode,
-		PaymentMethod: method,
-		PaymentNumber: payment.PaymentNumber,
+		ProjectID:      project.ID,
+		OrderID:        originalOrderID,
+		GatewayOrderID: gatewayOrderID,
+		Reference:      payment.Reference,
+		Amount:         req.Amount,
+		Fee:            payment.Fee,
+		TotalPayment:   payment.TotalPayment,
+		Status:         "pending",
+		Mode:           project.Mode,
+		PaymentMethod:  method,
+		PaymentNumber:  payment.PaymentNumber,
 	}
 
 	err = h.TransactionRepo.Create(transaction)
@@ -107,62 +111,53 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	})
 }
 
-func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
-	// Duitku can send as Form or JSON
+func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
+	// WijayaPay callback structure
 	var payload struct {
-		MerchantCode    string `json:"merchantCode" form:"merchantCode"`
-		Amount          string `json:"amount" form:"amount"`
-		MerchantOrderId string `json:"merchantOrderId" form:"merchantOrderId"`
-		Signature       string `json:"signature" form:"signature"`
-		ResultCode      string `json:"resultCode" form:"resultCode"`
-		Reference       string `json:"reference" form:"reference"`
+		Status string `json:"status"` // e.g. "paid"
+		Data   struct {
+			RefID        string `json:"ref_id"`
+			TrxReference string `json:"trx_reference"`
+			Nominal      string `json:"nominal"`
+		} `json:"data"`
 	}
 
 	if err := c.BodyParser(&payload); err != nil {
-		// If BodyParser fails, try manual form values
-		payload.MerchantCode = c.FormValue("merchantCode")
-		payload.Amount = c.FormValue("amount")
-		payload.MerchantOrderId = c.FormValue("merchantOrderId")
-		payload.Signature = c.FormValue("signature")
-		payload.ResultCode = c.FormValue("resultCode")
-		payload.Reference = c.FormValue("reference")
+		return c.Status(400).SendString("Invalid payload")
 	}
 
-	fmt.Printf("Incoming Webhook: OrderID=%s, Amount=%s, Result=%s\n",
-		payload.MerchantOrderId, payload.Amount, payload.ResultCode)
+	signature := c.Get("X-Signature")
+
+	fmt.Printf("Incoming WijayaPay Webhook: OrderID=%s, Status=%s\n",
+		payload.Data.RefID, payload.Status)
 
 	// Verify Signature
-	err := h.Duitku.VerifyCallback(payload.MerchantOrderId, payload.Amount, payload.Signature)
+	err := h.WijayaPay.VerifyCallback(payload.Data.RefID, payload.Data.Nominal, signature)
 	if err != nil {
 		fmt.Printf("Webhook Signature Invalid: %v\n", err)
 		return c.Status(400).SendString("Invalid signature")
 	}
 
 	// Fetch transaction to see if it exists
-	tx, err := h.TransactionRepo.FindByOrderID(payload.MerchantOrderId)
+	tx, err := h.TransactionRepo.FindByOrderID(payload.Data.RefID)
 	if err != nil {
-		fmt.Printf("Webhook Error: Transaction %s not found in database: %v\n", payload.MerchantOrderId, err)
-		return c.Status(200).SendString("OK")
-	}
-
-	// Ensure we use the correct reference if available in payload
-	if payload.Reference != "" && tx.Reference == "" {
-		tx.Reference = payload.Reference
+		fmt.Printf("Webhook Error: Transaction %s not found in database: %v\n", payload.Data.RefID, err)
+		return c.Status(200).JSON(fiber.Map{"status": true})
 	}
 
 	// 3. Process Settlement Atomically
-	if payload.ResultCode == "00" {
-		err = h.ProcessSettlement(payload.MerchantOrderId, payload.Reference)
+	if payload.Status == "paid" {
+		err = h.ProcessSettlement(payload.Data.RefID, payload.Data.TrxReference)
 		if err != nil {
-			fmt.Printf("Settlement Error for %s: %v\n", payload.MerchantOrderId, err)
-			return c.Status(200).SendString("RetryLater") // Ask Duitku to retry or just log
+			fmt.Printf("Settlement Error for %s: %v\n", payload.Data.RefID, err)
+			return c.Status(200).JSON(fiber.Map{"status": false})
 		}
 
-		fmt.Printf("Transaction %s (Ref: %s) processed successfully\n", payload.MerchantOrderId, payload.Reference)
+		fmt.Printf("Transaction %s (Ref: %s) processed successfully\n", payload.Data.RefID, payload.Data.TrxReference)
 
 		// 4. Forward Callback asynchronously
-		tx, _ = h.TransactionRepo.FindByOrderAndReference(payload.MerchantOrderId, payload.Reference)
-		project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(payload.MerchantOrderId, payload.Reference)
+		tx, _ = h.TransactionRepo.FindByOrderAndReference(payload.Data.RefID, payload.Data.TrxReference)
+		project, _ := h.TransactionRepo.FindProjectByTransactionOrderAndReference(payload.Data.RefID, payload.Data.TrxReference)
 
 		if project != nil && project.WebhookURL != "" && tx.Jenis != "url" {
 			netAmount := tx.Amount
@@ -187,21 +182,15 @@ func (h *PaymentHandler) DuitkuWebhook(c *fiber.Ctx) error {
 		// 5. Send notification email asynchronously
 		if project != nil && project.NotifikasiKe != "" {
 			h.WorkerPool.Submit(func() {
-				// Use original order ID for email notification
 				err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
 				if err != nil {
 					fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)
 				}
 			})
 		}
-	} else {
-		// Failure or Pending
-		// We can update status to failed here if it's not success
-		// For simplicity, let's just log
-		fmt.Printf("Transaction %s failed with code %s\n", payload.MerchantOrderId, payload.ResultCode)
 	}
 
-	return c.Status(200).SendString("OK")
+	return c.Status(200).JSON(fiber.Map{"status": true})
 }
 
 func (h *PaymentHandler) SendCallback(url string, payload models.WebhookPayload) {
@@ -231,9 +220,26 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 		})
 	}
 
+	// Security: Validate project name matches
+	if req.Project != projectFromCtx.Nama {
+		return c.Status(401).JSON(fiber.Map{"error": "Project name mismatch"})
+	}
+
 	tx, err := h.TransactionRepo.FindByProjectAndOrderID(projectFromCtx.ID, req.OrderID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
+	}
+
+	// Security: Validate amount matches
+	if tx.Amount != req.Amount {
+		return c.Status(400).JSON(fiber.Map{"error": "Transaction amount mismatch"})
+	}
+
+	// Security: Validate transaction mode
+	if tx.Mode != "sandbox" {
+		return c.Status(403).JSON(fiber.Map{
+			"error": "Simulation only available for transactions in sandbox mode",
+		})
 	}
 
 	if tx.Status == "success" {
@@ -291,10 +297,20 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 
 	project := c.Locals("project").(*models.Project)
 
+	// Security: Validate project name matches
+	if req.Project != project.Nama {
+		return c.Status(401).JSON(fiber.Map{"error": "Project name mismatch"})
+	}
+
 	// Find transaction in database (filtered by project to prevent affecting other projects)
 	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, req.OrderID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
+	}
+
+	// Security: Validate amount matches
+	if tx.Amount != req.Amount {
+		return c.Status(400).JSON(fiber.Map{"error": "Transaction amount mismatch"})
 	}
 
 	// Validate transaction is in a cancellable state
@@ -304,8 +320,8 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 		})
 	}
 
-	// Call Duitku cancel API
-	err = h.Duitku.CancelTransaction(project.Mode, req)
+	// Call WijayaPay cancel API
+	err = h.WijayaPay.CancelTransaction(project.Mode, req)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -455,19 +471,20 @@ func (h *PaymentHandler) ReconcileTransactions(projectID uint) error {
 }
 
 func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
-	amountStr := c.Query("amount", "0")
+	amountStr := c.Query("amount")
+	hasAmount := amountStr != ""
 	var amount float64
-	fmt.Sscanf(amountStr, "%f", &amount)
+	if hasAmount {
+		fmt.Sscanf(amountStr, "%f", &amount)
+	}
 
 	var methods []models.PaymentMethod
 	var err error
 
 	project, ok := c.Locals("project").(*models.Project)
 	if ok && project != nil {
-		// If project is authenticated, only show their enabled methods
 		methods, err = h.PaymentMethodRepo.GetByProjectID(project.ID)
 	} else {
-		// Fallback to all globally active methods if no project context
 		methods, err = h.PaymentMethodRepo.GetAllActive()
 	}
 
@@ -477,12 +494,19 @@ func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
 
 	var methodItems []models.PaymentMethodItem
 	for _, m := range methods {
-		totalFee := m.FeeFlat + (amount * m.FeePercent)
+		var totalFeePtr *float64
+		if hasAmount {
+			totalFee := m.FeeFlat + (amount * m.FeePercent)
+			totalFeePtr = &totalFee
+		}
+
 		methodItems = append(methodItems, models.PaymentMethodItem{
 			PaymentMethod: m.Code,
 			PaymentName:   m.Name,
 			PaymentImage:  m.ImageURL,
-			TotalFee:      totalFee,
+			TotalFee:      totalFeePtr,
+			FeeFlat:       m.FeeFlat,
+			FeePercent:    m.FeePercent,
 		})
 	}
 
@@ -736,12 +760,12 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 				fee := newPm.FeeFlat + (amount * newPm.FeePercent)
 				req := models.TransactionRequest{
 					Project: project.Nama,
-					OrderID: currentTx.DuitkuOrderID,
+					OrderID: currentTx.GatewayOrderID,
 					Amount:  amount,
 					APIKey:  project.APIKey,
 				}
 
-				payment, errD := h.Duitku.CreateTransaction(project.Mode, newPm.DuitkuCode, fee, req, project.FeeByMerchant)
+				payment, errD := h.WijayaPay.CreateTransaction(project.Mode, newPm.GatewayCode, fee, req, project.FeeByMerchant)
 				if errD == nil {
 					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber)
 					if errU == nil {
@@ -769,34 +793,34 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		}
 
 		fee := pm.FeeFlat + (amount * pm.FeePercent)
-		duitkuOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+		gatewayOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
 
 		req := models.TransactionRequest{
 			Project: project.Nama,
-			OrderID: duitkuOrderID,
+			OrderID: gatewayOrderID,
 			Amount:  amount,
 			APIKey:  project.APIKey,
 		}
 
-		payment, err := h.Duitku.CreateTransaction(project.Mode, pm.DuitkuCode, fee, req, project.FeeByMerchant)
+		payment, err := h.WijayaPay.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
 		if err != nil {
-			fmt.Printf("[URL-PAY] Duitku Create Error: %v\n", err)
+			fmt.Printf("[URL-PAY] WijayaPay Create Error: %v\n", err)
 			return c.Status(500).SendString("Gagal membuat transaksi: " + err.Error())
 		}
 
 		currentTx = &models.Transaction{
-			ProjectID:     project.ID,
-			OrderID:       orderID,
-			DuitkuOrderID: duitkuOrderID,
-			Reference:     payment.Reference,
-			Amount:        amount,
-			Fee:           payment.Fee,
-			TotalPayment:  payment.TotalPayment,
-			Status:        "pending",
-			Mode:          project.Mode,
-			PaymentMethod: method,
-			PaymentNumber: payment.PaymentNumber,
-			Jenis:         "url",
+			ProjectID:      project.ID,
+			OrderID:        orderID,
+			GatewayOrderID: gatewayOrderID,
+			Reference:      payment.Reference,
+			Amount:         amount,
+			Fee:            payment.Fee,
+			TotalPayment:   payment.TotalPayment,
+			Status:         "pending",
+			Mode:           project.Mode,
+			PaymentMethod:  method,
+			PaymentNumber:  payment.PaymentNumber,
+			Jenis:          "url",
 		}
 
 		err = h.TransactionRepo.Create(currentTx)

@@ -34,21 +34,16 @@ func main() {
 
 	emailService := services.NewEmailService()
 
-	duitkuService := services.NewDuitkuService(
-		services.DuitkuConfig{
-			MerchantCode: os.Getenv("DUITKU_MERCHANT_CODE"),
-			APIKey:       os.Getenv("DUITKU_API_KEY"),
-			BaseURL:      os.Getenv("DUITKU_BASE_URL"),
-		},
-		services.DuitkuConfig{
-			MerchantCode: os.Getenv("DUITKU_PROD_MERCHANT_CODE"),
-			APIKey:       os.Getenv("DUITKU_PROD_API_KEY"),
-			BaseURL:      os.Getenv("DUITKU_PROD_BASE_URL"),
+	wijayaPayService := services.NewWijayaPayService(
+		services.WijayaPayConfig{
+			MerchantCode: os.Getenv("WIJAYAPAY_MERCHANT_CODE"),
+			APIKey:       os.Getenv("WIJAYAPAY_API_KEY"),
+			BaseURL:      os.Getenv("WIJAYAPAY_BASE_URL"),
 		},
 	)
 
 	paymentHandler := handlers.NewPaymentHandler(
-		duitkuService,
+		wijayaPayService,
 		transactionRepo,
 		projectRepo,
 		ledgerRepo,
@@ -83,8 +78,8 @@ func main() {
 	// E. Transaction Detail API
 	api.Get("/transactiondetail", paymentHandler.TransactionDetail)
 
-	// Webhook from Duitku
-	app.Post("/webhook/duitku", paymentHandler.DuitkuWebhook)
+	// Webhook from WijayaPay
+	app.Post("/webhook/wijayapay", paymentHandler.WijayaPayWebhook)
 
 	// URL-based Integration (Integrasi Via URL)
 	app.Get("/pay/:slug/:amount", paymentHandler.PayByURL)

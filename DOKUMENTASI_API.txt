@@ -427,19 +427,17 @@ Catatan:
 D.5. Get Payment Methods (Daftar Metode Pembayaran)
 --------------------------------------------------------------------------------
 
-Gunakan API ini untuk mengambil daftar metode pembayaran yang aktif beserta 
-rincian biaya (fee) secara dinamis.
+Gunakan API ini untuk mengambil daftar metode pembayaran yang aktif.
 
 Method  : GET
 URL     : https://app.WinLink.com/api/get_metode_pembayaran
 
-Query Parameter:
-   - amount : (number, opsional) Nominal transaksi untuk menghitung total fee.
-              Jika dikosongkan, total fee dihitung dari base fee.
+Query Parameter (Opsional):
+   - amount : (number) Nominal transaksi untuk menghitung total fee secara otomatis.
 
 Contoh Request (CURL):
 
-   curl -L 'https://app.WinLink.com/api/get_metode_pembayaran?amount=100000' \
+   curl -L 'https://app.WinLink.com/api/get_metode_pembayaran' \
    -H 'X-API-Key: xxx123'
 
 Response Sukses (HTTP 200):
@@ -450,13 +448,17 @@ Response Sukses (HTTP 200):
                "payment_method": "qris",
                "payment_name": "QRIS",
                "payment_image": "https://app.winlink.com/images/qris.png",
-               "total_fee": 1010
+               "total_fee": 0,
+               "fee_flat": 0,
+               "fee_percent": 0.007
            },
            {
                "payment_method": "bri_va",
                "payment_name": "BRI Virtual Account",
                "payment_image": "https://app.winlink.com/images/bri.png",
-               "total_fee": 3500
+               "total_fee": 3500,
+               "fee_flat": 3500,
+               "fee_percent": 0
            }
        ]
    }
@@ -470,7 +472,7 @@ Catatan:
 E. WEBHOOK CALLBACK
 ================================================================================
 
-Webhook adalah cara sistem WinLink memberitahu server Anda bahwa ada 
+Webhook adalah cara sistem WijayaPay memberitahu server Anda bahwa ada 
 perubahan status transaksi. Anda TIDAK perlu memanggil API apapun 
 untuk menerima notifikasi ini — sistem akan otomatis mengirimkannya.
 
@@ -496,8 +498,8 @@ E.2. Struktur Data Callback
 
    {
        "amount": 99000,
-       "fee": 4500,
-       "net_amount": 94500,
+       "fee": 3500,
+       "net_amount": 95500,
        "order_id": "INV240910001",
        "project": "depodomain",
        "status": "success",

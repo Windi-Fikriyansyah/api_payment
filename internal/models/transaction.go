@@ -6,7 +6,7 @@ type Transaction struct {
 	ID            uint      `json:"id"`
 	ProjectID     uint      `json:"project_id"`
 	OrderID       string    `json:"order_id"`
-	DuitkuOrderID string    `json:"duitku_order_id"`
+	GatewayOrderID string    `json:"gateway_order_id"`
 	Reference     string    `json:"reference"`
 	Amount        float64   `json:"amount"`
 	Fee           float64   `json:"fee"`

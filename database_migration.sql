@@ -1,6 +1,6 @@
 -- 1. Tambahkan Column baru ke tabel yang sudah ada
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS duitku_order_id VARCHAR(255);
-CREATE INDEX IF NOT EXISTS idx_transactions_duitku_order_id ON transactions(duitku_order_id);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS gateway_order_id VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_transactions_gateway_order_id ON transactions(gateway_order_id);
 
 -- 2. Buat Tabel Baru untuk Ledger (Log Keuangan)
 CREATE TABLE IF NOT EXISTS ledgers (

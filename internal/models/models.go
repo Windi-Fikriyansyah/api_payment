@@ -43,7 +43,7 @@ type TransactionDetail struct {
 type PaymentMethod struct {
 	ID         uint    `json:"id"`
 	Code       string  `json:"code"`
-	DuitkuCode string  `json:"duitku_code"`
+	GatewayCode string  `json:"gateway_code"`
 	Name       string  `json:"name"`
 	ImageURL   string  `json:"image_url"`
 	FeeFlat    float64 `json:"fee_flat"`
@@ -54,8 +54,10 @@ type PaymentMethod struct {
 type PaymentMethodItem struct {
 	PaymentMethod string  `json:"payment_method"`
 	PaymentName   string  `json:"payment_name"`
-	PaymentImage  string  `json:"payment_image"`
-	TotalFee      float64 `json:"total_fee"`
+	PaymentImage  string   `json:"payment_image"`
+	TotalFee      *float64 `json:"total_fee,omitempty"`
+	FeeFlat       float64  `json:"fee_flat"`
+	FeePercent    float64 `json:"fee_percent"`
 }
 
 type PaymentMethodResponse struct {
