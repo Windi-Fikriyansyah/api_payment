@@ -173,7 +173,7 @@ func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
 
 		// 4. Forward Callback asynchronously
 		project, _ := h.ProjectRepo.FindByID(tx.ProjectID)
-		if project != nil && project.WebhookURL != "" && tx.Jenis != "url" {
+		if project != nil && project.WebhookURL != "" {
 			netAmount := tx.Amount
 			if tx.TotalPayment == tx.Amount {
 				netAmount = tx.Amount - tx.Fee
@@ -200,6 +200,26 @@ func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
 				if err != nil {
 					fmt.Printf("Email Notification Error for %s: %v\n", tx.OrderID, err)
 				}
+			})
+		}
+	} else if status == "expired" || status == "batal" {
+		// Update status to expired
+		h.TransactionRepo.UpdateStatus(tx.OrderID, tx.Reference, "expired")
+
+		// Forward to merchant
+		project, _ := h.ProjectRepo.FindByID(tx.ProjectID)
+		if project != nil && project.WebhookURL != "" {
+			h.WorkerPool.Submit(func() {
+				h.SendCallback(project.WebhookURL, models.WebhookPayload{
+					Amount:        tx.Amount,
+					Fee:           tx.Fee,
+					NetAmount:     tx.Amount, // Same as amount for expired
+					OrderID:       tx.OrderID,
+					Project:       project.Nama,
+					Status:        "expired",
+					PaymentMethod: tx.PaymentMethod,
+					CompletedAt:   time.Now(),
+				})
 			})
 		}
 	}
@@ -794,7 +814,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 
 				payment, err := h.IPaymu.CreateTransaction(project.Mode, newPm.GatewayCode, fee, req, project.FeeByMerchant)
 				if err == nil {
-					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, newGatewayOrderID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber)
+					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, newGatewayOrderID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber, payment.ExpiredAt)
 					if errU == nil {
 						currentTx.GatewayOrderID = newGatewayOrderID
 						currentTx.Reference = payment.Reference
@@ -802,6 +822,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 						currentTx.TotalPayment = payment.TotalPayment
 						currentTx.PaymentMethod = method
 						currentTx.PaymentNumber = payment.PaymentNumber
+						currentTx.ExpiredAt = payment.ExpiredAt
 					}
 				} else {
 					// Redirect back with error message
@@ -855,6 +876,8 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 			PaymentMethod:  method,
 			PaymentNumber:  payment.PaymentNumber,
 			Jenis:          "url",
+			ExpiredAt:      payment.ExpiredAt,
+			CreatedAt:      time.Now(),
 		}
 
 		err = h.TransactionRepo.Create(currentTx)
@@ -902,7 +925,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		backHTML = `<a href="` + backURL + `" class="btn btn-outline">Ganti Metode Pembayaran</a>`
 	}
 
-	expiryStr := currentTx.CreatedAt.Add(1 * time.Hour).Format("02 Jan 2006, 15:04 WIB")
+	expiryStr := currentTx.ExpiredAt.Format("02 Jan 2006, 15:04 WIB")
 
 	// FIXED FEE LOGIC: Use explicit variables for display
 	displayFee := 0.0

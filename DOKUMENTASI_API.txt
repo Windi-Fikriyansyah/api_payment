@@ -10,14 +10,15 @@ Terakhir diperbarui: 17 Maret 2026
 A. PENDAHULUAN
 ================================================================================
 
-Selamat datang di dokumentasi API WinLink Payment Gateway.
+Selamat datang di dokumentasi API LinkBayar Payment Gateway.
 
 Dokumentasi ini ditujukan untuk merchant yang ingin mengintegrasikan 
-sistem pembayaran WinLink ke dalam website atau aplikasi mereka.
+sistem pembayaran LinkBayar ke dalam website atau aplikasi mereka.
 
 Dengan API ini, Anda dapat:
-   - Membuat transaksi pembayaran (QRIS, Virtual Account)
-   - Menerima notifikasi otomatis saat pembayaran berhasil
+   - Membuat transaksi pembayaran (QRIS, Virtual Account, Retail)
+   - Menerima notifikasi otomatis saat pembayaran berhasil (Webhook)
+   - Integrasi mudah dengan Checkout Page (Integrasi Via URL)
    - Membatalkan transaksi yang belum dibayar
    - Mengecek status/detail transaksi
    - Melakukan simulasi pembayaran untuk testing
@@ -32,14 +33,15 @@ B.1. Persiapan
 
 Sebelum mulai menggunakan API, pastikan Anda telah:
 
-   1. Mendaftar akun di dashboard WinLink
+   1. Mendaftar akun di dashboard LinkBayar
    2. Membuat project baru
-   3. Mencatat API Key dari halaman detail project
+   3. Mencatat API Key dan Slug dari halaman detail project
    4. Mengatur Webhook URL di pengaturan project
 
-Informasi yang Anda butuhkan:
-   - Base URL   : http://localhost:3005
+Information:
+   - Base URL   : https://app.linkbayar.my.id
    - API Key    : Tersedia di halaman detail project Anda
+   - Slug       : Tersedia di halaman detail project Anda (digunakan untuk Integrasi Via URL)
 
 
 ================================================================================
@@ -133,14 +135,14 @@ Body (JSON):
    }
 
 Penjelasan Field Request:
-   - project  : (string, wajib) Nama project Anda di WinLink
+   - project  : (string, wajib) Nama project Anda di LinkBayar
    - order_id : (string, wajib) ID pesanan unik dari sistem Anda
    - amount   : (number, wajib) Jumlah pembayaran dalam Rupiah
    - api_key  : (string, wajib) API Key project Anda
 
 Contoh Request (CURL):
 
-   curl -L -X POST 'https://app.WinLink.com/api/transactioncreate/qris' \
+   curl -L -X POST 'https://app.LinkBayar.com/api/transactioncreate/qris' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -152,7 +154,7 @@ Contoh Request (CURL):
 Contoh Request (PHP):
 
    $ch = curl_init();
-   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactioncreate/qris');
+   curl_setopt($ch, CURLOPT_URL, 'https://app.LinkBayar.com/api/transactioncreate/qris');
    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
    curl_setopt($ch, CURLOPT_POST, true);
    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
@@ -233,7 +235,7 @@ Penjelasan Field Request:
 
 Contoh Request (CURL):
 
-   curl -L -X POST 'https://app.WinLink.com/api/transactioncancel' \
+   curl -L -X POST 'https://app.LinkBayar.com/api/transactioncancel' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -245,7 +247,7 @@ Contoh Request (CURL):
 Contoh Request (PHP):
 
    $ch = curl_init();
-   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactioncancel');
+   curl_setopt($ch, CURLOPT_URL, 'https://app.LinkBayar.com/api/transactioncancel');
    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
    curl_setopt($ch, CURLOPT_POST, true);
    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
@@ -292,7 +294,7 @@ Query Parameter:
 
 Contoh Request (CURL):
 
-   curl -L 'https://app.WinLink.com/api/transactiondetail?order_id=INV240910001' \
+   curl -L 'https://app.LinkBayar.com/api/transactiondetail?order_id=INV240910001' \
    -H 'X-API-Key: xxx123'
 
 Contoh Request (PHP):
@@ -301,7 +303,7 @@ Contoh Request (PHP):
    $apiKey  = 'xxx123';
    
    $ch = curl_init();
-   curl_setopt($ch, CURLOPT_URL, 'https://app.WinLink.com/api/transactiondetail?order_id=' . $orderID);
+   curl_setopt($ch, CURLOPT_URL, 'https://app.LinkBayar.com/api/transactiondetail?order_id=' . $orderID);
    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
    curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-API-Key: ' . $apiKey]);
    $response = curl_exec($ch);
@@ -393,7 +395,7 @@ Penjelasan Field Request:
 
 Contoh Request (CURL):
 
-   curl -L -X POST 'https://app.WinLink.com/api/paymentsimulation' \
+   curl -L -X POST 'https://app.LinkBayar.com/api/paymentsimulation' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -437,7 +439,7 @@ Query Parameter (Opsional):
 
 Contoh Request (CURL):
 
-   curl -L 'https://app.WinLink.com/api/get_metode_pembayaran' \
+   curl -L 'https://app.LinkBayar.com/api/get_metode_pembayaran' \
    -H 'X-API-Key: xxx123'
 
 Response Sukses (HTTP 200):
@@ -447,7 +449,7 @@ Response Sukses (HTTP 200):
            {
                "payment_method": "qris",
                "payment_name": "QRIS",
-               "payment_image": "https://app.winlink.com/images/qris.png",
+               "payment_image": "https://app.linkbayar.my.id/images/qris.png",
                "total_fee": 0,
                "fee_flat": 0,
                "fee_percent": 0.007
@@ -455,7 +457,7 @@ Response Sukses (HTTP 200):
            {
                "payment_method": "bri_va",
                "payment_name": "BRI Virtual Account",
-               "payment_image": "https://app.winlink.com/images/bri.png",
+               "payment_image": "https://app.linkbayar.my.id/images/bri.png",
                "total_fee": 3500,
                "fee_flat": 3500,
                "fee_percent": 0
@@ -509,7 +511,7 @@ E.2. Struktur Data Callback
 
    Penjelasan Field:
    - amount         : (number) Jumlah nominal transaksi asal
-   - fee            : (number) Total biaya transaksi (Duitku + Margin WinLink)
+   - fee            : (number) Total biaya transaksi (Duitku + Margin LinkBayar)
    - net_amount     : (number) Jumlah bersih yang diterima merchant (setelah potong fee)
    - order_id       : (string) ID pesanan dari sistem Anda
    - project        : (string) Nama project
@@ -523,7 +525,7 @@ E.3. Cara Menerima Callback
 
    1. Buat endpoint di server Anda yang menerima POST request
    2. Daftarkan URL endpoint tersebut sebagai Webhook URL di 
-      pengaturan project pada dashboard WinLink
+      pengaturan project pada dashboard LinkBayar
    3. Server Anda harus merespons dengan HTTP 200 untuk mengkonfirmasi 
       penerimaan
 
@@ -651,14 +653,14 @@ Diagram Alur Status:
 G. ALUR INTEGRASI
 ================================================================================
 
-Berikut langkah-langkah untuk mengintegrasikan WinLink ke sistem Anda:
+Berikut langkah-langkah untuk mengintegrasikan LinkBayar ke sistem Anda:
 
 
 G.1. Persiapan (Satu Kali)
 ----------------------------
 
    LANGKAH 1: Daftar & Buat Project
-      - Daftar akun di dashboard WinLink
+      - Daftar akun di dashboard LinkBayar
       - Buat project baru
       - Catat API Key Anda
 
@@ -732,7 +734,7 @@ G.3. Contoh Implementasi Lengkap (PHP)
    // Panggil API Transaction Create
    $ch = curl_init();
    curl_setopt($ch, CURLOPT_URL, 
-       'https://app.WinLink.com/api/transactioncreate/' . $method);
+       'https://app.LinkBayar.com/api/transactioncreate/' . $method);
    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
    curl_setopt($ch, CURLOPT_POST, true);
    curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -834,7 +836,7 @@ H.2. Alur Testing Pembatalan
 -------------------------------
 
    # Langkah 1: Buat transaksi
-   curl -X POST 'https://app.WinLink.com/api/transactioncreate/bni_va' \
+   curl -X POST 'https://app.LinkBayar.com/api/transactioncreate/bni_va' \
    -H 'Content-Type: application/json' \
    -d '{
        "project": "depodomain",
@@ -908,7 +910,7 @@ J. KODE ERROR
 K. SKEMA BIAYA & FEE
 ================================================================================
 
-WinLink menerapkan sistem biaya transaksi yang kompetitif. Biaya ini 
+LinkBayar menerapkan sistem biaya transaksi yang kompetitif. Biaya ini 
 bergantung pada metode pembayaran dan pengaturan project Anda.
 
 K.1. Perhitungan Biaya (Fee)
@@ -977,9 +979,43 @@ L. TIPS & CATATAN PENTING
       - Tes semua skenario: sukses, cancel, dan error
 
    6. PRODUCTION
-      - Hubungi tim WinLink untuk mengaktifkan mode production
+      - Hubungi tim LinkBayar untuk mengaktifkan mode production
       - Pastikan semua testing sudah selesai di sandbox
       - Gunakan HTTPS untuk semua komunikasi
+
+
+--------------------------------------------------------------------------------
+D.6. Integrasi Via URL (Halaman Checkout)
+--------------------------------------------------------------------------------
+
+Integrasi ini adalah cara tercepat tanpa perlu membuat sistem backend sendiri
+untuk memilih metode pembayaran. Anda hanya perlu mengarahkan pelanggan ke
+URL checkout kami, dan sistem akan menangani proses pemilihan metode, 
+pembayaran, hingga redirect kembali ke website Anda.
+
+URL Base:
+https://app.linkbayar.my.id/pay/{slug}/{amount}
+
+Query Parameters:
+   - order_id : (wajib) ID pesanan unik dari sistem Anda (string)
+   - redirect : (opsional) URL tujuan setelah pembayaran sukses (string)
+
+Contoh Penggunaan:
+Pelanggan Anda berbelanja Rp 100.000 dengan Order ID "INV-123".
+Maka arahkan pelanggan ke:
+
+https://app.linkbayar.my.id/pay/depodomain/100000?order_id=INV-123&redirect=https://tokoanda.com/finish
+
+Cara Kerja:
+   1. Pelanggan klik tombol "Bayar" di website Anda.
+   2. Link mengarah ke URL LinkBayar di atas.
+   3. Pelanggan memilih metode pembayaran (QRIS, VA, dll) di halaman LinkBayar.
+   4. Pelanggan melihat instruksi bayar (nomor VA/QRIS).
+   5. Pelanggan membayar.
+   6. Sistem kami mendeteksi pembayaran dan mengirim Webhook ke server Anda.
+   7. Halaman checkout otomatis berubah menjadi "Pembayaran Berhasil".
+   8. (OTOMATIS) Sistem kami tetap mengirimkan Webhook Callback ke server Anda.
+   9. Pelanggan klik "Kembali ke halaman merchant" dan diarahkan ke 'redirect' URL Anda.
 
 
 ================================================================================
@@ -988,8 +1024,8 @@ L. BANTUAN & KONTAK
 
 Jika Anda mengalami kendala dalam integrasi, silakan hubungi:
 
-   Email   : support@WinLink.com
-   Website : https://app.WinLink.com
+   Email   : support@linkbayar.my.id
+   Website : https://app.linkbayar.my.id
 
 
 ================================================================================

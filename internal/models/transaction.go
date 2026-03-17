@@ -16,6 +16,7 @@ type Transaction struct {
 	PaymentMethod string    `json:"payment_method"`
 	PaymentNumber string    `json:"payment_number"`
 	Jenis         string    `json:"jenis"`
+	ExpiredAt     time.Time `json:"expired_at"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
