@@ -53,32 +53,44 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 		return s.createSandboxTransaction(gatewayMethod, fee, req, totalPayment)
 	}
 
-	// iPaymu Payload
-	payload := map[string]interface{}{
-		"name":        "Customer", // Can be dynamic if added to models
-		"phone":       "08123456789",
-		"email":       "customer@email.com",
-		"amount":      totalPayment,
-		"notifyUrl":   "", // Handled by our gateway but iPaymu needs it for direct webhook
-		"expired":     24,
-		"expiredType": "hours",
-		"referenceId": req.OrderID,
-		"paymentMethod": strings.ToLower(gatewayMethod), // e.g., va, qris, cstore
+	// Determine paymentMethod and paymentChannel from gateway code
+	// iPaymu gateway codes from DB: "qris", "bca", "mandiri", "bri", "bni", etc.
+	paymentMethod := strings.ToLower(gatewayMethod)
+	paymentChannel := strings.ToLower(gatewayMethod)
+
+	// Map to iPaymu's expected paymentMethod + paymentChannel
+	switch paymentMethod {
+	case "qris":
+		paymentMethod = "qris"
+		paymentChannel = "qris"
+	case "alfamart", "indomaret":
+		paymentChannel = paymentMethod
+		paymentMethod = "cstore"
+	default:
+		// VA banks: bca, mandiri, bri, bni, cimb, permata, danamon, bag, bsi, bnc, muamalat
+		paymentChannel = paymentMethod
+		paymentMethod = "va"
 	}
 
-    // Specialized payment channels for VA
-    if strings.Contains(strings.ToLower(gatewayMethod), "va") {
-        payload["paymentMethod"] = "va"
-        // iPaymu uses paymentChannel for specific banks in VA
-        // We'll assume gatewayMethod passed is the channel (e.g., bca, bri)
-        payload["paymentChannel"] = strings.ReplaceAll(strings.ToLower(gatewayMethod), "_va", "")
-    } else if strings.ToLower(gatewayMethod) == "qris" {
-        payload["paymentMethod"] = "qris"
-        payload["paymentChannel"] = "qris"
-    }
+	// iPaymu Payload
+	payload := map[string]interface{}{
+		"name":           "Customer",
+		"phone":          "08123456789",
+		"email":          "customer@email.com",
+		"amount":         totalPayment,
+		"notifyUrl":      "",
+		"expired":        24,
+		"expiredType":    "hours",
+		"referenceId":    req.OrderID,
+		"paymentMethod":  paymentMethod,
+		"paymentChannel": paymentChannel,
+	}
 
 	body, _ := json.Marshal(payload)
 	signature := s.GenerateSignature(body, "POST")
+	timestamp := time.Now().Format("20060102150405")
+
+	fmt.Printf("[iPaymu] Method=%s, Channel=%s, Amount=%.0f, Ref=%s\n", paymentMethod, paymentChannel, totalPayment, req.OrderID)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	httpReq, err := http.NewRequest("POST", s.Config.BaseURL+"/api/v2/payment/direct", bytes.NewBuffer(body))
@@ -88,6 +100,7 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("va", s.Config.Va)
 	httpReq.Header.Set("signature", signature)
+	httpReq.Header.Set("timestamp", timestamp)
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
