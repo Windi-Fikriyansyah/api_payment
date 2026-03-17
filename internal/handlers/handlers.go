@@ -2,7 +2,11 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,6 +27,7 @@ type PaymentHandler struct {
 	LedgerRepo        *repository.LedgerRepository
 	AuditLogRepo      *repository.AuditLogRepository
 	PaymentMethodRepo *repository.PaymentMethodRepository
+	SessionRepo       *repository.SessionRepository
 	WorkerPool        *services.WorkerPool
 	EmailService      *services.EmailService
 	DB                *sql.DB
@@ -35,6 +40,7 @@ func NewPaymentHandler(
 	ledgerRepo *repository.LedgerRepository,
 	auditLogRepo *repository.AuditLogRepository,
 	paymentMethodRepo *repository.PaymentMethodRepository,
+	sessionRepo *repository.SessionRepository,
 	workerPool *services.WorkerPool,
 	emailService *services.EmailService,
 	db *sql.DB,
@@ -46,6 +52,7 @@ func NewPaymentHandler(
 		LedgerRepo:        ledgerRepo,
 		AuditLogRepo:      auditLogRepo,
 		PaymentMethodRepo: paymentMethodRepo,
+		SessionRepo:       sessionRepo,
 		WorkerPool:        workerPool,
 		EmailService:      emailService,
 		DB:                db,
@@ -549,18 +556,62 @@ func (h *PaymentHandler) GetPaymentMethods(c *fiber.Ctx) error {
 	})
 }
 
-func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
-	slug := c.Params("slug")
-	amountStr := c.Params("amount")
-	orderID := c.Query("order_id")
-	redirect := c.Query("redirect")
+func (h *PaymentHandler) CreateCheckoutSession(c *fiber.Ctx) error {
+	project := c.Locals("project").(*models.Project)
+	var req models.CheckoutSessionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Permintaan tidak valid"})
+	}
 
-	var amount float64
-	fmt.Sscanf(amountStr, "%f", &amount)
+	if req.Amount <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Nominal pembayaran tidak boleh kosong"})
+	}
+
+	// Generate Random Token
+	b := make([]byte, 32)
+	rand.Read(b)
+	token := hex.EncodeToString(b)
+
+	// Create Session
+	session := &models.PaymentSession{
+		Token:       token,
+		ProjectID:   project.ID,
+		Amount:      req.Amount,
+		OrderID:     req.OrderID,
+		RedirectURL: req.RedirectURL,
+		ExpiredAt:   time.Now().Add(1 * time.Hour), // Expire in 1 hour
+	}
+
+	if err := h.SessionRepo.Create(session); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Gagal membuat sesi pembayaran"})
+	}
+
+	paymentURL := fmt.Sprintf("%s/pay/%s/%s", c.BaseURL(), project.Slug, token)
+
+	return c.JSON(models.CheckoutSessionResponse{
+		PaymentURL: paymentURL,
+		OrderID:    session.OrderID,
+		Amount:     session.Amount,
+	})
+}
+
+func (h *PaymentHandler) PayBySession(c *fiber.Ctx) error {
+	slug := c.Params("slug")
+	token := c.Params("token")
 
 	project, err := h.ProjectRepo.FindBySlug(slug)
 	if err != nil {
 		return c.Status(404).SendString("Proyek tidak ditemukan")
+	}
+
+	// Find Session
+	session, err := h.SessionRepo.FindByToken(token)
+	if err != nil {
+		return c.Status(404).SendString("Sesi pembayaran tidak ditemukan atau sudah kadaluarsa")
+	}
+
+	if session.ProjectID != project.ID {
+		return c.Status(403).SendString("Sesi ini tidak valid untuk proyek ini")
 	}
 
 	if project.Status != "Aktif" {
@@ -571,6 +622,10 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).SendString("Gagal mengambil metode pembayaran")
 	}
+
+	// We pass the session data to generate HTML
+	orderID := session.OrderID
+	amount := session.Amount
 
 	// Generate Premium HTML
 	htmlTemplate := `<!DOCTYPE html>
@@ -739,7 +794,7 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
 		if project.FeeByMerchant {
 			fee = 0
 		}
-		execURL := "/pay/" + slug + "/" + amountStr + "/result?method=" + m.Code + "&order_id=" + orderID + "&redirect=" + redirect
+		execURL := fmt.Sprintf("/pay/%s/%s/result?method=%s", slug, token, m.Code)
 
 		mCard := `<a href="{{EXEC_URL}}" class="method-card">
                     <img src="{{IMG_URL}}" alt="{{NAME}}">
@@ -770,20 +825,29 @@ func (h *PaymentHandler) PayByURL(c *fiber.Ctx) error {
 	return c.SendString(html)
 }
 
-func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
+func (h *PaymentHandler) PayBySessionExec(c *fiber.Ctx) error {
 	slug := c.Params("slug")
-	amountStr := c.Params("amount")
+	token := c.Params("token")
 	method := c.Query("method")
-	orderID := c.Query("order_id")
-	redirect := c.Query("redirect")
-
-	var amount float64
-	fmt.Sscanf(amountStr, "%f", &amount)
 
 	project, err := h.ProjectRepo.FindBySlug(slug)
 	if err != nil {
 		return c.Status(404).SendString("Project not found")
 	}
+
+	// Find Session
+	session, err := h.SessionRepo.FindByToken(token)
+	if err != nil {
+		return c.Status(404).SendString("Sesi pembayaran kadaluarsa")
+	}
+
+	if session.ProjectID != project.ID {
+		return c.Status(403).SendString("Akses ditolak")
+	}
+
+	orderID := session.OrderID
+	amount := session.Amount
+	redirect := session.RedirectURL
 
 	// Check if transaction already exists
 	tx, err := h.TransactionRepo.FindByProjectAndOrderID(project.ID, orderID)
@@ -827,7 +891,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 				} else {
 					// Redirect back with error message
 					errMsg := url.QueryEscape(err.Error())
-					return c.Redirect("/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect + "&error=" + errMsg)
+					return c.Redirect("/pay/" + slug + "/" + token + "?error=" + errMsg)
 				}
 			}
 		}
@@ -860,7 +924,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 			fmt.Printf("[URL-PAY] iPaymu Create Error: %v\n", err)
 			// Redirect back with error message as alert
 			errMsg := url.QueryEscape(err.Error())
-			return c.Redirect("/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect + "&error=" + errMsg)
+			return c.Redirect("/pay/" + slug + "/" + token + "?error=" + errMsg)
 		}
 
 		currentTx = &models.Transaction{
@@ -931,7 +995,7 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 		redirectHTML = strings.ReplaceAll(redirectHTML, "{{REDIRECT_URL}}", redirect)
 	}
 
-	backURL := "/pay/" + slug + "/" + amountStr + "?order_id=" + orderID + "&redirect=" + redirect
+	backURL := "/pay/" + slug + "/" + token
 	backHTML := ""
 	if !isSuccess {
 		backHTML = `<a href="` + backURL + `" class="btn btn-outline">Ganti Metode Pembayaran</a>`
@@ -1289,4 +1353,12 @@ func getStringFromMap(data map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func (h *PaymentHandler) generateURLSignature(slug, amount, orderID, redirect, apiKey string) string {
+	// Format: slug:amount:order_id:redirect
+	stringToSign := fmt.Sprintf("%s:%s:%s:%s", slug, amount, orderID, redirect)
+	mac := hmac.New(sha256.New, []byte(apiKey))
+	mac.Write([]byte(stringToSign))
+	return hex.EncodeToString(mac.Sum(nil))
 }

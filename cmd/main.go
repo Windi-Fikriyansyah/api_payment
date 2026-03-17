@@ -28,6 +28,7 @@ func main() {
 	ledgerRepo := repository.NewLedgerRepository(db)
 	auditLogRepo := repository.NewAuditLogRepository(db)
 	paymentMethodRepo := repository.NewPaymentMethodRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
 
 	workerPool := services.NewWorkerPool(5) // 5 concurrent workers
 	defer workerPool.Shutdown()
@@ -50,6 +51,7 @@ func main() {
 		ledgerRepo,
 		auditLogRepo,
 		paymentMethodRepo,
+		sessionRepo,
 		workerPool,
 		emailService,
 		db,
@@ -70,6 +72,9 @@ func main() {
 	// API Get Payment Methods
 	api.Get("/get_metode_pembayaran", paymentHandler.GetPaymentMethods)
 
+	// API Create Checkout Session (NEW)
+	api.Post("/checkout-session", paymentHandler.CreateCheckoutSession)
+
 	// C.4. Payment simulation
 	api.Post("/paymentsimulation", paymentHandler.PaymentSimulation)
 
@@ -82,9 +87,9 @@ func main() {
 	// Webhook from iPaymu
 	app.Post("/webhook/ipaymu", paymentHandler.IPaymuWebhook)
 
-	// URL-based Integration (Integrasi Via URL)
-	app.Get("/pay/:slug/:amount", paymentHandler.PayByURL)
-	app.Get("/pay/:slug/:amount/result", paymentHandler.PayByURLExec)
+	// URL-based Integration (Integrasi Via URL - SESSION BASED)
+	app.Get("/pay/:slug/:token", paymentHandler.PayBySession)
+	app.Get("/pay/:slug/:token/result", paymentHandler.PayBySessionExec)
 	app.Get("/pay/:slug/status/:order_id", paymentHandler.PayByURLStatus)
 
 	port := os.Getenv("PORT")

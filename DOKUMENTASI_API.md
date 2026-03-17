@@ -52,28 +52,69 @@ Gunakan API ini jika Anda ingin membuat halaman checkout sendiri.
 ```
 
 ### B. Integrasi Via URL (Checkout Page) 🚀
-Cara tercepat tanpa coding backend berat. Cukup arahkan pelanggan ke URL kami.
+Metode ini paling aman dan profesional. URL yang dihasilkan sangat pendek dan parameter aslinya tersembunyi.
 
+**Langkah 1: Buat Sesi Pembayaran (Server-to-Server)**
+Merchant memanggil API ini dari backend untuk mendapatkan token pembayaran.
+- **Method**: `POST`
+- **URL**: `https://app.linkbayar.my.id/api/checkout-session`
+- **Headers**: `X-API-Key: api_key_anda`
+- **Body (JSON)**:
+```json
+{
+    "amount": 50000,
+    "order_id": "INV-123",
+    "redirect_url": "https://tokoanda.com/success"
+}
+```
+**Response Sukses:**
+```json
+{
+    "payment_url": "https://app.linkbayar.my.id/pay/tokoonline/e8ff1622749f6a48...",
+    "order_id": "INV-123",
+    "amount": 50000
+}
+```
+
+**Langkah 2: Arahkan Pelanggan**
+Cukup arahkan pelanggan ke `payment_url` yang Anda dapatkan dari Langkah 1. URL ini berlaku selama 1 jam.
+
+**Keuntungan:**
+- URL sangat bersih dan pendek.
+- Nominal dan Order ID tidak bisa diubah oleh user.
+- Parameter sensitif tidak terlihat di browser.
+
+### C. Cek Status/Detail Transaksi
+Gunakan API ini untuk mendapatkan detail lengkap transaksi.
 - **Method**: `GET`
-- **URL**: `https://app.linkbayar.my.id/pay/{slug}/{amount}`
-- **Query Parameters**:
-    - `order_id` (wajib): ID pesanan unik Anda.
-    - `redirect` (opsional): URL tujuan setelah bayar sukses.
+- **URL**: `https://app.linkbayar.my.id/api/transactiondetail?order_id=INV-123`
+- **Headers**: `X-API-Key: api_key_anda`
 
-**Contoh Link:**
-`https://app.linkbayar.my.id/pay/tokoonline/50000?order_id=ORD-001&redirect=https://tokoanda.com/success`
+### D. Batalkan Transaksi
+Membatalkan transaksi yang masih berstatus `pending`.
+- **Method**: `POST`
+- **URL**: `https://app.linkbayar.my.id/api/transactioncancel`
+- **Headers**: `X-API-Key: api_key_anda`
+- **Body (JSON)**:
+```json
+{
+    "project": "nama_project_anda",
+    "order_id": "INV-123",
+    "amount": 50000
+}
+```
 
 ---
 
 ## 5. Webhook (Notifikasi Otomatis)
-Sistem kami akan mengirimkan POST ke URL Webhook Anda saat pembayaran berhasil.
+Sistem kami akan mengirimkan POST ke URL Webhook Anda saat status transaksi berubah (berhasil/expired/batal).
 
 **Payload (JSON):**
 ```json
 {
     "amount": 50000,
-    "fee": 0,
-    "net_amount": 50000,
+    "fee": 2500,
+    "net_amount": 47500,
     "order_id": "ORD-001",
     "project": "tokoonline",
     "status": "success",
@@ -84,7 +125,14 @@ Sistem kami akan mengirimkan POST ke URL Webhook Anda saat pembayaran berhasil.
 
 ---
 
-## 6. Bantuan
-Jika ada kendala, hubungi kami di:
+## 6. Testing & Sandbox
+Pastikan project Anda dalam mode **Sandbox** saat melakukan pengujian. Anda dapat mensimulasikan pembayaran sukses melalui API simulation:
+- **URL**: `POST /api/paymentsimulation`
+- **Body**: Sama dengan body request create transaction.
+
+---
+
+## 7. Bantuan
+Jika ada kendala, hubungi tim teknis kami:
 - **Email**: `support@linkbayar.my.id`
 - **Website**: [linkbayar.my.id](https://app.linkbayar.my.id)
