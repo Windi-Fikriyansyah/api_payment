@@ -890,13 +890,25 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 
 	// Calculate Dynamic HTML Parts
 	isSuccess := currentTx.Status == "success"
+	isExpired := currentTx.Status == "expired" || (!isSuccess && time.Now().After(currentTx.ExpiredAt))
+	
 	paymentLabel := "Nomor Virtual Account"
 	if currentTx.PaymentMethod == "qris" {
 		paymentLabel = "Scan kode QR di bawah ini"
 	}
+	
+	if isExpired {
+		paymentLabel = "Transaksi telah kadaluarsa"
+	}
 
 	var paymentInfoHTML string
-	if currentTx.PaymentMethod == "qris" {
+	if isExpired {
+		paymentInfoHTML = `<div style="text-align: center; padding: 20px;">
+            <div style="font-size: 48px; margin-bottom: 10px;">⏰</div>
+            <div style="color: #ef4444; font-weight: bold; font-size: 18px;">KADALUARSA</div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 5px;">Batas waktu pembayaran telah habis. Silakan buat transaksi baru.</p>
+        </div>`
+	} else if currentTx.PaymentMethod == "qris" {
 		paymentInfoHTML = `<div id="qrcode" class="qr-container"></div>
                <script>
                 var typeNumber = 0;
@@ -1180,7 +1192,13 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 	}
 
 	html := strings.ReplaceAll(htmlTemplate, "{{PAGE_CONTENT}}", pageContent)
-	html = strings.ReplaceAll(html, "{{TITLE}}", cond(isSuccess, "Pembayaran Berhasil", "Instruksi Pembayaran"))
+	title := "Instruksi Pembayaran"
+	if isSuccess {
+		title = "Pembayaran Berhasil"
+	} else if isExpired {
+		title = "Transaksi Kadaluarsa"
+	}
+	html = strings.ReplaceAll(html, "{{TITLE}}", title)
 	html = strings.ReplaceAll(html, "{{PROJECT_NAME}}", project.Nama)
 	html = strings.ReplaceAll(html, "{{ORDER_ID}}", currentTx.OrderID)
 	html = strings.ReplaceAll(html, "{{AMOUNT}}", formatRupiah(currentTx.Amount))
@@ -1194,15 +1212,15 @@ func (h *PaymentHandler) PayByURLExec(c *fiber.Ctx) error {
 	html = strings.ReplaceAll(html, "{{BACK_BUTTON}}", backHTML)
 	html = strings.ReplaceAll(html, "{{EXPIRY}}", expiryStr)
 
-	// Add Polling Script if pending
+	// Add Polling Script if pending and not expired
 	pollingScript := ""
-	if !isSuccess {
+	if !isSuccess && !isExpired {
 		pollingScript = `
         setInterval(function() {
             fetch('/pay/` + slug + `/status/` + orderID + `')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.status === 'success') {
+                    if (data.status === 'success' || data.status === 'expired') {
                         window.location.reload();
                     }
                 });
