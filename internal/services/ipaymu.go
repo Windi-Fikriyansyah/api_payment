@@ -16,9 +16,10 @@ import (
 )
 
 type IPaymuConfig struct {
-	Va           string
-	APIKey       string
-	BaseURL      string
+	Va      string
+	APIKey  string
+	BaseURL string
+	AppURL  string
 }
 
 type IPaymuService struct {
@@ -54,11 +55,9 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 	}
 
 	// Determine paymentMethod and paymentChannel from gateway code
-	// iPaymu gateway codes from DB: "qris", "bca", "mandiri", "bri", "bni", etc.
 	paymentMethod := strings.ToLower(gatewayMethod)
 	paymentChannel := strings.ToLower(gatewayMethod)
 
-	// Map to iPaymu's expected paymentMethod + paymentChannel
 	switch paymentMethod {
 	case "qris":
 		paymentMethod = "qris"
@@ -67,30 +66,46 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 		paymentChannel = paymentMethod
 		paymentMethod = "cstore"
 	default:
-		// VA banks: bca, mandiri, bri, bni, cimb, permata, danamon, bag, bsi, bnc, muamalat
+		// VA banks: bca, mandiri, bri, bni, cimb, permata, danamon, bag, bsi, bnc
 		paymentChannel = paymentMethod
 		paymentMethod = "va"
 	}
 
-	// iPaymu Payload
+	amountInt := int(totalPayment)
+
+	// iPaymu v2 Direct Payment Payload
 	payload := map[string]interface{}{
+		"product":        []string{"Payment"},
+		"qty":            []int{1},
+		"price":          []int{amountInt},
+		"amount":         amountInt,
+		"returnUrl":      s.Config.AppURL,
+		"notifyUrl":      s.Config.AppURL + "/webhook/ipaymu",
+		"cancelUrl":      s.Config.AppURL,
 		"name":           "Customer",
 		"phone":          "08123456789",
 		"email":          "customer@email.com",
-		"amount":         totalPayment,
-		"notifyUrl":      "",
-		"expired":        24,
-		"expiredType":    "hours",
 		"referenceId":    req.OrderID,
 		"paymentMethod":  paymentMethod,
 		"paymentChannel": paymentChannel,
+		"expired":        24,
+		"expiredType":    "hours",
 	}
 
 	body, _ := json.Marshal(payload)
+
+	// Generate signature: HMAC-SHA256(StringToSign, ApiKey)
+	// StringToSign = POST:VA:Lowercase(SHA256(body)):ApiKey
 	signature := s.GenerateSignature(body, "POST")
 	timestamp := time.Now().Format("20060102150405")
 
-	fmt.Printf("[iPaymu] Method=%s, Channel=%s, Amount=%.0f, Ref=%s\n", paymentMethod, paymentChannel, totalPayment, req.OrderID)
+	fmt.Printf("[iPaymu] === DEBUG ===\n")
+	fmt.Printf("[iPaymu] VA: %s\n", s.Config.Va)
+	fmt.Printf("[iPaymu] Body: %s\n", string(body))
+	fmt.Printf("[iPaymu] Signature: %s\n", signature)
+	fmt.Printf("[iPaymu] Timestamp: %s\n", timestamp)
+	fmt.Printf("[iPaymu] Method=%s, Channel=%s, Amount=%d, Ref=%s\n", paymentMethod, paymentChannel, amountInt, req.OrderID)
+	fmt.Printf("[iPaymu] URL: %s\n", s.Config.BaseURL+"/api/v2/payment/direct")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	httpReq, err := http.NewRequest("POST", s.Config.BaseURL+"/api/v2/payment/direct", bytes.NewBuffer(body))
@@ -120,11 +135,17 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 			ReferenceId   string `json:"ReferenceId"`
 			Va            string `json:"Va"`
 			QrString      string `json:"QrString"`
+			PaymentNo     string `json:"PaymentNo"`
+			PaymentName   string `json:"PaymentName"`
 			Expired       string `json:"Expired"`
 		} `json:"data"`
 	}
 
 	if err := json.Unmarshal(respBody, &ipaymuResp); err != nil {
+		// Try a more generic map if unmarshal fails
+		var genericResp map[string]interface{}
+		json.Unmarshal(respBody, &genericResp)
+		fmt.Printf("[iPaymu] Generic Parse: %+v\n", genericResp)
 		return nil, fmt.Errorf("failed to parse response: %v", err)
 	}
 
@@ -132,9 +153,14 @@ func (s *IPaymuService) CreateTransaction(mode string, gatewayMethod string, fee
 		return nil, fmt.Errorf("%s", ipaymuResp.Message)
 	}
 
-	paymentNumber := ipaymuResp.Data.Va
-	if ipaymuResp.Data.QrString != "" {
+	// Try multiple fields for payment number
+	paymentNumber := ""
+	if ipaymuResp.Data.Va != "" {
+		paymentNumber = ipaymuResp.Data.Va
+	} else if ipaymuResp.Data.QrString != "" {
 		paymentNumber = ipaymuResp.Data.QrString
+	} else if ipaymuResp.Data.PaymentNo != "" {
+		paymentNumber = ipaymuResp.Data.PaymentNo
 	}
 
 	expiredAt := time.Now().Add(24 * time.Hour)
@@ -163,11 +189,23 @@ func (s *IPaymuService) createSandboxTransaction(gatewayMethod string, fee float
 	reference := "IP-SANDBOX-" + strconv.FormatInt(time.Now().Unix(), 10)
 	paymentNumber := ""
 
-	upperMethod := strings.ToUpper(gatewayMethod)
-	if strings.Contains(upperMethod, "VA") {
+	method := strings.ToLower(gatewayMethod)
+	// List of VA banks in iPaymu
+	isVA := false
+	vaBanks := []string{"bca", "bri", "bni", "mandiri", "cimb", "permata", "danamon", "bag", "bsi", "bnc", "muamalat"}
+	for _, b := range vaBanks {
+		if method == b || strings.Contains(method, "va") {
+			isVA = true
+			break
+		}
+	}
+
+	if isVA {
 		paymentNumber = "99" + strconv.Itoa(int(time.Now().Unix()%100000000))
-	} else if upperMethod == "QRIS" {
+	} else if method == "qris" {
 		paymentNumber = "00020101021126570022ID.CO.IPAYMU.WWW0118936005230000052203030215123456789012345678905204599953033605802ID5911IPAYMU6013JAKARTA62070703A016304ABCD"
+	} else if method == "alfamart" || method == "indomaret" {
+		paymentNumber = "88" + strconv.Itoa(int(time.Now().Unix()%100000000))
 	} else {
 		paymentNumber = "SANDBOX-" + strconv.FormatInt(time.Now().Unix(), 10)
 	}

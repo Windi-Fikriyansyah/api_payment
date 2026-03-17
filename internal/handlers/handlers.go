@@ -113,37 +113,58 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 }
 
 func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
-	// IP Whitelisting Security
 	clientIP := c.IP()
-	fmt.Printf("Incoming iPaymu Webhook from IP: %s\n", clientIP)
-	
-	// iPaymu callback structure
-	var payload struct {
-		TrxID       string `json:"trx_id"`
-		Status      string `json:"status"` // 'berhasil' or 'pending'
-		ReferenceID string `json:"sid"`    // They use 'sid' or 'reference_id'
-        Amount      string `json:"total"`
+	rawBody := string(c.Body())
+	fmt.Printf("[iPaymu Webhook] IP: %s\n", clientIP)
+	fmt.Printf("[iPaymu Webhook] Raw Body: %s\n", rawBody)
+
+	// Try to parse as JSON first, then form data
+	var data map[string]interface{}
+	if err := json.Unmarshal(c.Body(), &data); err != nil {
+		// Parse as form data
+		data = make(map[string]interface{})
+		c.Request().PostArgs().VisitAll(func(key, value []byte) {
+			data[string(key)] = string(value)
+		})
 	}
 
-	if err := c.BodyParser(&payload); err != nil {
-        // iPaymu sometimes sends as form data
-        payload.TrxID = c.FormValue("trx_id")
-        payload.Status = c.FormValue("status")
-        payload.ReferenceID = c.FormValue("sid")
-        payload.Amount = c.FormValue("total")
+	fmt.Printf("[iPaymu Webhook] Parsed data: %+v\n", data)
+
+	// Extract fields - iPaymu may use different field names
+	trxID := getStringFromMap(data, "trx_id", "transaction_id", "TransactionId")
+	status := getStringFromMap(data, "status", "Status")
+	statusCode := getStringFromMap(data, "status_code", "StatusCode")
+	referenceID := getStringFromMap(data, "reference_id", "referenceId", "ReferenceId", "sid")
+	via := getStringFromMap(data, "via", "channel", "payment_channel", "payment_method")
+
+	fmt.Printf("[iPaymu Webhook] TrxID=%s, Status=%s, StatusCode=%s, RefID=%s, Via=%s\n",
+		trxID, status, statusCode, referenceID, via)
+
+	// Determine if payment was successful
+	isSuccess := status == "berhasil" || statusCode == "1" || statusCode == "6"
+
+	// Try to find transaction by reference_id (our gateway_order_id)
+	var tx *models.Transaction
+	var err error
+
+	if referenceID != "" {
+		tx, err = h.TransactionRepo.FindByOrderID(referenceID)
 	}
 
-	fmt.Printf("Incoming iPaymu Webhook: TrxID=%s, Status=%s, Ref=%s\n",
-		payload.TrxID, payload.Status, payload.ReferenceID)
+	// If not found by reference_id, try by trx_id (iPaymu's transaction ID stored as our reference)
+	if (tx == nil || err != nil) && trxID != "" {
+		tx, err = h.TransactionRepo.FindByReference(trxID)
+	}
 
-	// Fetch transaction
-	tx, err := h.TransactionRepo.FindByOrderID(payload.ReferenceID)
-	if err != nil {
-		fmt.Printf("Webhook Error: Transaction %s not found: %v\n", payload.ReferenceID, err)
+	if tx == nil || err != nil {
+		fmt.Printf("[iPaymu Webhook] Transaction not found. RefID=%s, TrxID=%s, err=%v\n", referenceID, trxID, err)
 		return c.Status(200).SendString("OK")
 	}
 
-	if payload.Status == "berhasil" {
+	fmt.Printf("[iPaymu Webhook] Found transaction: OrderID=%s, GatewayOrderID=%s, Reference=%s, Status=%s\n",
+		tx.OrderID, tx.GatewayOrderID, tx.Reference, tx.Status)
+
+	if isSuccess {
 		err = h.ProcessSettlement(tx.OrderID, tx.Reference)
 		if err != nil {
 			fmt.Printf("Settlement Error for %s: %v\n", tx.OrderID, err)
@@ -1209,4 +1230,22 @@ func formatRupiah(amount float64) string {
 		res += string(v)
 	}
 	return res
+}
+
+func getStringFromMap(data map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if val, ok := data[key]; ok {
+			switch v := val.(type) {
+			case string:
+				if v != "" {
+					return v
+				}
+			case float64:
+				return fmt.Sprintf("%.0f", v)
+			case int:
+				return fmt.Sprintf("%d", v)
+			}
+		}
+	}
+	return ""
 }

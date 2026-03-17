@@ -84,3 +84,16 @@ func (r *TransactionRepository) UpdatePaymentMethod(id uint, gatewayOrderID stri
 	_, err := r.DB.Exec(query, gatewayOrderID, reference, fee, totalPayment, method, paymentNumber, id)
 	return err
 }
+
+func (r *TransactionRepository) FindByReference(reference string) (*models.Transaction, error) {
+	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, created_at, updated_at 
+	          FROM transactions WHERE reference = $1 LIMIT 1`
+
+	row := r.DB.QueryRow(query, reference)
+	var t models.Transaction
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}

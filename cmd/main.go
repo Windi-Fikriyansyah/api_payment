@@ -39,6 +39,7 @@ func main() {
 			Va:      os.Getenv("IPAYMU_VA"),
 			APIKey:  os.Getenv("IPAYMU_API_KEY"),
 			BaseURL: os.Getenv("IPAYMU_BASE_URL"),
+			AppURL:  os.Getenv("APP_URL"),
 		},
 	)
 
