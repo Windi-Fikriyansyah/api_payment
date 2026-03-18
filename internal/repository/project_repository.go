@@ -15,7 +15,7 @@ func NewProjectRepository(db *sql.DB) *ProjectRepository {
 }
 
 func (r *ProjectRepository) FindByAPIKey(apiKey string) (*models.Project, error) {
-	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, webhook_url, notifikasi_ke, api_key, created_at, updated_at, user_id, no_whatsapp 
+	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, COALESCE(webhook_url, ''), COALESCE(notifikasi_ke, ''), api_key, created_at, updated_at, user_id, COALESCE(no_whatsapp, '') 
 	          FROM projects WHERE api_key = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, apiKey)
@@ -39,7 +39,7 @@ func (r *ProjectRepository) FindByAPIKey(apiKey string) (*models.Project, error)
 }
 
 func (r *ProjectRepository) FindByID(id uint) (*models.Project, error) {
-	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, webhook_url, notifikasi_ke, api_key, created_at, updated_at, user_id, no_whatsapp 
+	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, COALESCE(webhook_url, ''), COALESCE(notifikasi_ke, ''), api_key, created_at, updated_at, user_id, COALESCE(no_whatsapp, '') 
 	          FROM projects WHERE id = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, id)
@@ -54,7 +54,7 @@ func (r *ProjectRepository) FindByID(id uint) (*models.Project, error) {
 }
 
 func (r *ProjectRepository) FindByIDWithTx(tx *sql.Tx, id uint) (*models.Project, error) {
-	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, webhook_url, notifikasi_ke, api_key, created_at, updated_at, user_id, no_whatsapp 
+	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, COALESCE(webhook_url, ''), COALESCE(notifikasi_ke, ''), api_key, created_at, updated_at, user_id, COALESCE(no_whatsapp, '') 
 	          FROM projects WHERE id = $1 FOR UPDATE`
 
 	row := tx.QueryRow(query, id)
@@ -76,8 +76,9 @@ func (r *ProjectRepository) UpdateBalanceWithTx(tx *sql.Tx, projectID uint, tota
 	return err
 }
 func (r *ProjectRepository) FindBySlug(slug string) (*models.Project, error) {
-	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, webhook_url, notifikasi_ke, api_key, created_at, updated_at, user_id, no_whatsapp 
+	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, COALESCE(webhook_url, ''), COALESCE(notifikasi_ke, ''), api_key, created_at, updated_at, user_id, COALESCE(no_whatsapp, '') 
 	          FROM projects WHERE slug = $1 LIMIT 1`
+ 
 
 	row := r.DB.QueryRow(query, slug)
 
@@ -94,8 +95,9 @@ func (r *ProjectRepository) FindBySlug(slug string) (*models.Project, error) {
 	return &p, nil
 }
 func (r *ProjectRepository) FindByNoWhatsApp(noWhatsApp string) (*models.Project, error) {
-	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, webhook_url, notifikasi_ke, api_key, created_at, updated_at, user_id, no_whatsapp 
+	query := `SELECT id, nama, slug, total_transaksi, saldo_tertunda, status, mode, fee_by_merchant, COALESCE(webhook_url, ''), COALESCE(notifikasi_ke, ''), api_key, created_at, updated_at, user_id, COALESCE(no_whatsapp, '') 
 	          FROM projects WHERE no_whatsapp = $1 LIMIT 1`
+ 
 
 	row := r.DB.QueryRow(query, noWhatsApp)
 
