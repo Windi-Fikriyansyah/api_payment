@@ -19,4 +19,6 @@ type Transaction struct {
 	ExpiredAt     time.Time `json:"expired_at"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	BuyerName      string    `json:"buyer_name"`
+	WhatsappNumber string    `json:"whatsapp_number"`
 }

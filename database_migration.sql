@@ -46,3 +46,10 @@ CREATE TABLE IF NOT EXISTS project_payment_methods (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_pm_project ON project_payment_methods(project_id);
+
+-- 7. Tambahkan Whatsapp Number Column
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
+ALTER TABLE payment_sessions ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS no_whatsapp VARCHAR(20);
+
+-- Fonnte Webhook URL: [APP_URL]/webhook/fonnte

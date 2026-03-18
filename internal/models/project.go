@@ -17,4 +17,5 @@ type Project struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	UserID         uint      `json:"user_id"`
+	NoWhatsApp     string    `json:"no_whatsapp"`
 }

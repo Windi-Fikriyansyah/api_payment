@@ -10,10 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"payment_service/internal/models"
 	"payment_service/internal/repository"
 	"payment_service/internal/services"
-	"net/url"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type PaymentHandler struct {
 	SessionRepo       *repository.SessionRepository
 	WorkerPool        *services.WorkerPool
 	EmailService      *services.EmailService
+	FonnteService     *services.FonnteService
 	DB                *sql.DB
 }
 
@@ -43,6 +45,7 @@ func NewPaymentHandler(
 	sessionRepo *repository.SessionRepository,
 	workerPool *services.WorkerPool,
 	emailService *services.EmailService,
+	fonnteService *services.FonnteService,
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
@@ -55,6 +58,7 @@ func NewPaymentHandler(
 		SessionRepo:       sessionRepo,
 		WorkerPool:        workerPool,
 		EmailService:      emailService,
+		FonnteService:     fonnteService,
 		DB:                db,
 	}
 }
@@ -190,7 +194,6 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 				})
 			})
 		}
-
 		// Send notification email asynchronously
 		if project != nil && project.NotifikasiKe != "" {
 			h.WorkerPool.Submit(func() {
@@ -200,6 +203,127 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 				}
 			})
 		}
+
+		// Send WhatsApp notification asynchronously if available
+		if tx.WhatsappNumber != "" {
+			h.WorkerPool.Submit(func() {
+				atasNama := ""
+				if tx.BuyerName != "" {
+					atasNama = "\nPembeli: " + tx.BuyerName
+				}
+				msg := fmt.Sprintf("✅ *Pembayaran Berhasil!*\n\nOrder ID: %s%s\nNominal: Rp %s\nStatus: Terbayar\n\nTerima kasih telah melakukan pembayaran.\n\n1️⃣ *Buat Pesanan*\n2️⃣ *Cek Saldo*",
+					tx.OrderID, atasNama, formatRupiah(tx.Amount))
+				err := h.FonnteService.SendMessage(tx.WhatsappNumber, msg)
+				if err != nil {
+					fmt.Printf("WhatsApp Notification Error for %s: %v\n", tx.OrderID, err)
+				}
+			})
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{"status": true})
+}
+
+func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
+	var payload struct {
+		Sender   string `json:"sender"`
+		Message  string `json:"message"`
+		Receiver string `json:"device"` // Fonnte menggunakan field 'device' untuk nomor bot
+	}
+
+	// Logging raw body untuk memantau webhook masuk di terminal
+	fmt.Printf("[Fonnte Webhook Raw] Body: %s\n", string(c.Body()))
+
+	if err := c.BodyParser(&payload); err != nil {
+		fmt.Printf("[Fonnte Webhook] JSON Parse Error: %v\n", err)
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid payload"})
+	}
+
+	fmt.Printf("[Fonnte Webhook Masuk] Pengirim: %s | Bot: %s | Pesan: %s\n", payload.Sender, payload.Receiver, payload.Message)
+
+	// Handle Auto-Reply berbasis Angka
+	cleanMsg := strings.TrimSpace(payload.Message)
+	if cleanMsg == "1" {
+		h.FonnteService.SendMessage(payload.Sender, "📝 *Buat Pesanan*\nSilakan gunakan format: Namapembeli#Harga")
+		return c.Status(200).JSON(fiber.Map{"status": true})
+	}
+	if cleanMsg == "2" {
+		project, err := h.ProjectRepo.FindByNoWhatsApp(payload.Sender)
+		if err == nil {
+			balance, errB := h.ProjectRepo.CalculateBalance(project.ID, project.Mode)
+			if errB == nil {
+				h.FonnteService.SendMessage(payload.Sender, fmt.Sprintf("💰 *Total Saldo (Mode: %s)*\nProject: %s\n\nSaldo Anda: *Rp %s*", 
+					project.Mode, project.Nama, formatRupiah(balance)))
+			} else {
+				h.FonnteService.SendMessage(payload.Sender, "⚠️ Gagal mengambil saldo: "+errB.Error())
+			}
+		} else {
+			h.FonnteService.SendMessage(payload.Sender, "⚠️ Maaf, nomor Anda tidak terdaftar.")
+		}
+		return c.Status(200).JSON(fiber.Map{"status": true})
+	}
+
+	// Format: namapembeli#harga
+	parts := strings.Split(payload.Message, "#")
+	if len(parts) != 2 {
+		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Format salah. Gunakan namapembeli#harga atau pilih menu (1/2)"})
+	}
+
+	namaPembeli := strings.TrimSpace(parts[0])
+	hargaStr := strings.TrimSpace(parts[1])
+	var harga float64
+	fmt.Sscanf(hargaStr, "%f", &harga)
+
+	if harga <= 0 {
+		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Harga tidak valid"})
+	}
+
+	// 1. CARI PROJECT BERDASARKAN NOMOR PENGIRIM (SENDER)
+	project, err := h.ProjectRepo.FindByNoWhatsApp(payload.Sender)
+	if err != nil {
+		fmt.Printf("[Fonnte Webhook] Nomor pengirim %s TIDAK TERDAFTAR di database.\n", payload.Sender)
+		h.FonnteService.SendMessage(payload.Sender, "⚠️ Maaf, nomor WhatsApp Anda ("+payload.Sender+") tidak terdaftar sebagai pemilik proyek.\n\nSilakan daftarkan proyek Anda di sini: https://linkbayar.my.id")
+		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Sender not registered"})
+	}
+
+	fmt.Printf("[Fonnte Webhook] Merchant Ditemukan: %s (Project: %s)\n", payload.Sender, project.Nama)
+
+	// 2. LANJUT BUAT SESSION TRANSAKSI
+	b := make([]byte, 16)
+	rand.Read(b)
+	token := hex.EncodeToString(b)
+	orderID := fmt.Sprintf("WA-%d-%d", project.ID, time.Now().Unix())
+
+	session := &models.PaymentSession{
+		Token:          token,
+		ProjectID:      project.ID,
+		Amount:         harga,
+		OrderID:        orderID,
+		ExpiredAt:      time.Now().Add(1 * time.Hour),
+		BuyerName:      namaPembeli,
+		WhatsappNumber: payload.Sender,
+	}
+
+	if err := h.SessionRepo.Create(session); err != nil {
+		fmt.Printf("[Fonnte Webhook] Error DB: %v\n", err)
+		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Internal error"})
+	}
+
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = c.BaseURL()
+	}
+	paymentURL := fmt.Sprintf("%s/pay/%s/%s", appURL, project.Slug, token)
+
+	// 3. KIRIM BALIK LINK PEMBAYARAN KE MERCHANT (SENDER)
+	replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah link pembayaran Anda:\n💰 Nominal: Rp %s\n🔗 Link Bayar: %s",
+		namaPembeli, formatRupiah(harga), paymentURL)
+
+	err = h.FonnteService.SendMessage(payload.Sender, replyMessage)
+	if err != nil {
+		fmt.Printf("[Fonnte Webhook] Gagal kirim balasan: %v\n", err)
+	} else {
+		fmt.Printf("[Fonnte Webhook] Berhasil kirim link pembayaran ke %s\n", payload.Sender)
 	}
 
 	return c.Status(200).JSON(fiber.Map{"status": true})
@@ -242,9 +366,9 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Transaction not found"})
 	}
 
-	// Security: Validate amount matches
-	if tx.Amount != req.Amount {
-		return c.Status(400).JSON(fiber.Map{"error": "Transaction amount mismatch"})
+	// Security: Validate amount matches (must match total payment including fees)
+	if tx.TotalPayment != req.Amount {
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("Transaction amount mismatch. Expected total payment: %.2f", tx.TotalPayment)})
 	}
 
 	// Security: Validate transaction mode
@@ -295,6 +419,22 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 		})
 	}
 
+	// Send WhatsApp notification asynchronously if available (NEW: Sandbox Notification)
+	if tx.WhatsappNumber != "" {
+		h.WorkerPool.Submit(func() {
+			atasNama := ""
+			if tx.BuyerName != "" {
+				atasNama = "\nPembeli: " + tx.BuyerName
+			}
+			msg := fmt.Sprintf("✅ *Pembayaran Berhasil (Simulasi)!*\n\nOrder ID: %s%s\nNominal: Rp %s\nStatus: Terbayar\n\nTerima kasih telah melakukan pembayaran.\n\n1️⃣ *Buat Pesanan*\n2️⃣ *Cek Saldo*",
+				tx.OrderID, atasNama, formatRupiah(tx.Amount))
+			err := h.FonnteService.SendMessage(tx.WhatsappNumber, msg)
+			if err != nil {
+				fmt.Printf("WhatsApp Notification Error for %s: %v\n", tx.OrderID, err)
+			}
+		})
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"status":  "success",
 		"message": "Simulation successful for " + req.OrderID,
@@ -334,9 +474,8 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 
 	// Call WijayaPay cancel is not currently supported in their docs for standard API
 	// but we'll leave it as no-op or implement if they have one.
-	// err = h.WijayaPay.CancelTransaction(project.Mode, req) 
+	// err = h.WijayaPay.CancelTransaction(project.Mode, req)
 	fmt.Printf("[%s] WijayaPay Cancel Request for %s (No-op)\n", project.Mode, req.OrderID)
-
 
 	// Update transaction status in database atomically (partial transaction for status change)
 	dtx, dtxe := h.DB.Begin()
@@ -913,6 +1052,8 @@ func (h *PaymentHandler) PayBySessionExec(c *fiber.Ctx) error {
 			Jenis:          "url",
 			ExpiredAt:      payment.ExpiredAt,
 			CreatedAt:      time.Now(),
+			BuyerName:      session.BuyerName,
+			WhatsappNumber: session.WhatsappNumber,
 		}
 
 		err = h.TransactionRepo.Create(currentTx)
@@ -926,12 +1067,12 @@ func (h *PaymentHandler) PayBySessionExec(c *fiber.Ctx) error {
 	// Calculate Dynamic HTML Parts
 	isSuccess := currentTx.Status == "success"
 	isExpired := currentTx.Status == "expired" || (!isSuccess && time.Now().After(currentTx.ExpiredAt))
-	
+
 	paymentLabel := "Nomor Virtual Account"
 	if currentTx.PaymentMethod == "qris" {
 		paymentLabel = "Scan kode QR di bawah ini"
 	}
-	
+
 	if isExpired {
 		paymentLabel = "Transaksi telah kadaluarsa"
 	}

@@ -34,6 +34,7 @@ func main() {
 	defer workerPool.Shutdown()
 
 	emailService := services.NewEmailService()
+	fonnteService := services.NewFonnteService()
 
 	wijayapayService := services.NewWijayaPayService(
 		services.WijayaPayConfig{
@@ -54,6 +55,7 @@ func main() {
 		sessionRepo,
 		workerPool,
 		emailService,
+		fonnteService,
 		db,
 	)
 
@@ -86,6 +88,9 @@ func main() {
 
 	// Webhook from WijayaPay
 	app.Post("/webhook/wijayapay", paymentHandler.WijayaPayWebhook)
+
+	// Webhook from Fonnte
+	app.Post("/webhook/fonnte", paymentHandler.FonnteWebhook)
 
 	// URL-based Integration (Integrasi Via URL - SESSION BASED)
 	app.Get("/pay/:slug/:token", paymentHandler.PayBySession)

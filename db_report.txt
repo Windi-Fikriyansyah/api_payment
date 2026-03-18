@@ -1,16 +1,19 @@
-Columns in transactions table:
-COL: id | TYPE: integer
-COL: project_id | TYPE: integer
-COL: order_id | TYPE: character varying
-COL: reference | TYPE: character varying
-COL: amount | TYPE: numeric
-COL: fee | TYPE: numeric
-COL: total_payment | TYPE: numeric
-COL: status | TYPE: character varying
-COL: payment_method | TYPE: character varying
-COL: payment_number | TYPE: text
-COL: created_at | TYPE: timestamp without time zone
-COL: updated_at | TYPE: timestamp without time zone
-COL: mode | TYPE: character varying
-COL: duitku_order_id | TYPE: character varying
-COL: jenis | TYPE: character varying
+Tables in database:
+TABLE: payment_sessions
+TABLE: jobs
+TABLE: job_batches
+TABLE: failed_jobs
+TABLE: migrations
+TABLE: password_reset_tokens
+TABLE: sessions
+TABLE: cache
+TABLE: cache_locks
+TABLE: users
+TABLE: projects
+TABLE: transactions
+TABLE: payment_methods
+TABLE: project_payment_methods
+TABLE: ledgers
+TABLE: audit_logs
+TABLE: rekening_bank
+TABLE: penarikan

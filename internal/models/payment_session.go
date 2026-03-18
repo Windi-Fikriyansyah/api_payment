@@ -10,7 +10,9 @@ type PaymentSession struct {
 	OrderID     string    `json:"order_id"`
 	RedirectURL string    `json:"redirect_url"`
 	ExpiredAt   time.Time `json:"expired_at"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt      time.Time `json:"created_at"`
+	BuyerName      string    `json:"buyer_name"`
+	WhatsappNumber string    `json:"whatsapp_number"`
 }
 
 type CheckoutSessionRequest struct {
