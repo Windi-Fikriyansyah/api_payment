@@ -252,7 +252,7 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 		if err == nil {
 			balance, errB := h.ProjectRepo.CalculateBalance(project.ID, project.Mode)
 			if errB == nil {
-				h.FonnteService.SendMessage(payload.Sender, fmt.Sprintf("💰 *Total Saldo (Mode: %s)*\nProject: %s\n\nSaldo Anda: *Rp %s*", 
+				h.FonnteService.SendMessage(payload.Sender, fmt.Sprintf("💰 *Total Saldo (Mode: %s)*\nProject: %s\n\nSaldo Anda: *Rp %s*",
 					project.Mode, project.Nama, formatRupiah(balance)))
 			} else {
 				h.FonnteService.SendMessage(payload.Sender, "⚠️ Gagal mengambil saldo: "+errB.Error())
@@ -882,7 +882,7 @@ func (h *PaymentHandler) PayBySession(c *fiber.Ctx) error {
             </div>
         </div>
         <div class="footer">
-            Powered by LinkBayar Payment Gateway
+            Powered by LinkBayar
         </div>
     </div>
     <script>
@@ -1435,16 +1435,20 @@ func cond(c bool, t, f string) string {
 }
 
 func formatRupiah(amount float64) string {
-	s := fmt.Sprintf("%.0f", amount)
-	if len(s) <= 3 {
-		return s
-	}
+	parts := strings.Split(fmt.Sprintf("%.2f", amount), ".")
+	intStr := parts[0]
+	decStr := parts[1]
+
 	var res string
-	for i, v := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
+	for i, v := range intStr {
+		if i > 0 && (len(intStr)-i)%3 == 0 {
 			res += "."
 		}
 		res += string(v)
+	}
+
+	if decStr != "00" {
+		res += "," + decStr
 	}
 	return res
 }
