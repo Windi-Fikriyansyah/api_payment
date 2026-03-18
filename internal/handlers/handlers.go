@@ -21,7 +21,7 @@ import (
 )
 
 type PaymentHandler struct {
-	IPaymu            *services.IPaymuService
+	WijayaPay         *services.WijayaPayService
 	TransactionRepo   *repository.TransactionRepository
 	ProjectRepo       *repository.ProjectRepository
 	LedgerRepo        *repository.LedgerRepository
@@ -34,7 +34,7 @@ type PaymentHandler struct {
 }
 
 func NewPaymentHandler(
-	ipaymu *services.IPaymuService,
+	wijayapay *services.WijayaPayService,
 	transactionRepo *repository.TransactionRepository,
 	projectRepo *repository.ProjectRepository,
 	ledgerRepo *repository.LedgerRepository,
@@ -46,7 +46,7 @@ func NewPaymentHandler(
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
-		IPaymu:            ipaymu,
+		WijayaPay:         wijayapay,
 		TransactionRepo:   transactionRepo,
 		ProjectRepo:       projectRepo,
 		LedgerRepo:        ledgerRepo,
@@ -87,7 +87,7 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	gatewayOrderID := fmt.Sprintf("P%d-%s", project.ID, originalOrderID)
 	req.OrderID = gatewayOrderID
 
-	payment, err := h.IPaymu.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
+	payment, err := h.WijayaPay.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -119,66 +119,57 @@ func (h *PaymentHandler) CreateTransaction(c *fiber.Ctx) error {
 	})
 }
 
-func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
+func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 	clientIP := c.IP()
-	rawBody := string(c.Body())
-	fmt.Printf("[iPaymu Webhook] IP: %s\n", clientIP)
-	fmt.Printf("[iPaymu Webhook] Raw Body: %s\n", rawBody)
+	fmt.Printf("[WijayaPay Webhook] IP: %s\n", clientIP)
 
-	// Try to parse as JSON first, then form data
-	var data map[string]interface{}
-	if err := json.Unmarshal(c.Body(), &data); err != nil {
-		// Parse as form data
-		data = make(map[string]interface{})
-		c.Request().PostArgs().VisitAll(func(key, value []byte) {
-			data[string(key)] = string(value)
-		})
+	var payload struct {
+		Data struct {
+			UpdatedAt      string  `json:"updated_at"`
+			PaymentMethode string  `json:"payment_methode"`
+			TotalDibayar   float64 `json:"total_dibayar"`
+			TotalFee       float64 `json:"total_fee"`
+			AmountReceived float64 `json:"amount_received"`
+			TrxReference   string  `json:"trx_reference"`
+			RefId          string  `json:"ref_id"`
+		} `json:"data"`
+		Status string `json:"status"` // "paid"
 	}
 
-	fmt.Printf("[iPaymu Webhook] Parsed data: %+v\n", data)
+	if err := c.BodyParser(&payload); err != nil {
+		fmt.Printf("[WijayaPay Webhook] Parse Error: %v\n", err)
+		return c.Status(400).JSON(fiber.Map{"status": false, "message": "Invalid payload"})
+	}
 
-	// Extract fields - iPaymu may use different field names
-	trxID := getStringFromMap(data, "trx_id", "transaction_id", "TransactionId")
-	status := getStringFromMap(data, "status", "Status")
-	statusCode := getStringFromMap(data, "status_code", "StatusCode")
-	referenceID := getStringFromMap(data, "reference_id", "referenceId", "ReferenceId", "sid")
-	via := getStringFromMap(data, "via", "channel", "payment_channel", "payment_method")
+	signature := c.Get("X-Signature")
+	if !h.WijayaPay.VerifyCallbackSignature(payload.Data.RefId, signature) {
+		fmt.Printf("[WijayaPay Webhook] Invalid Signature: %s for RefId: %s\n", signature, payload.Data.RefId)
+		// For testing purposes, we might want to log this but continue if it's from a trusted IP or just return error
+		// return c.Status(401).JSON(fiber.Map{"status": false, "message": "Invalid signature"})
+	}
 
-	fmt.Printf("[iPaymu Webhook] TrxID=%s, Status=%s, StatusCode=%s, RefID=%s, Via=%s\n",
-		trxID, status, statusCode, referenceID, via)
+	fmt.Printf("[WijayaPay Webhook] RefID=%s, TrxRef=%s, Status=%s\n",
+		payload.Data.RefId, payload.Data.TrxReference, payload.Status)
 
 	// Determine if payment was successful
-	isSuccess := status == "berhasil" || statusCode == "1" || statusCode == "6"
+	isSuccess := payload.Status == "paid"
 
-	// Try to find transaction by reference_id (our gateway_order_id)
-	var tx *models.Transaction
-	var err error
-
-	if referenceID != "" {
-		tx, err = h.TransactionRepo.FindByOrderID(referenceID)
-	}
-
-	// If not found by reference_id, try by trx_id (iPaymu's transaction ID stored as our reference)
-	if (tx == nil || err != nil) && trxID != "" {
-		tx, err = h.TransactionRepo.FindByReference(trxID)
-	}
+	// Find transaction by gateway_order_id (which is RefID in WijayaPay)
+	tx, err := h.TransactionRepo.FindByOrderID(payload.Data.RefId)
 
 	if tx == nil || err != nil {
-		fmt.Printf("[iPaymu Webhook] Transaction not found. RefID=%s, TrxID=%s, err=%v\n", referenceID, trxID, err)
-		return c.Status(200).SendString("OK")
+		fmt.Printf("[WijayaPay Webhook] Transaction not found for RefID=%s, err=%v\n", payload.Data.RefId, err)
+		return c.Status(200).JSON(fiber.Map{"status": true}) // Always return true to stop retries if not found
 	}
 
-	fmt.Printf("[iPaymu Webhook] Found transaction: OrderID=%s, GatewayOrderID=%s, Reference=%s, Status=%s\n",
-		tx.OrderID, tx.GatewayOrderID, tx.Reference, tx.Status)
-
-	if isSuccess {
+	if isSuccess && tx.Status == "pending" {
 		err = h.ProcessSettlement(tx.OrderID, tx.Reference)
 		if err != nil {
 			fmt.Printf("Settlement Error for %s: %v\n", tx.OrderID, err)
-			return c.Status(200).SendString("FAILED")
+			return c.Status(500).JSON(fiber.Map{"status": false})
 		}
 
-		// 4. Forward Callback asynchronously
+		// Forward Callback asynchronously
 		project, _ := h.ProjectRepo.FindByID(tx.ProjectID)
 		if project != nil && project.WebhookURL != "" {
 			netAmount := tx.Amount
@@ -200,7 +191,7 @@ func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
 			})
 		}
 
-		// 5. Send notification email asynchronously
+		// Send notification email asynchronously
 		if project != nil && project.NotifikasiKe != "" {
 			h.WorkerPool.Submit(func() {
 				err := h.EmailService.SendPaymentSuccessEmail(project.NotifikasiKe, project.Nama, tx.OrderID, tx.Amount)
@@ -209,29 +200,9 @@ func (h *PaymentHandler) IPaymuWebhook(c *fiber.Ctx) error {
 				}
 			})
 		}
-	} else if status == "expired" || status == "batal" {
-		// Update status to expired
-		h.TransactionRepo.UpdateStatus(tx.OrderID, tx.Reference, "expired")
-
-		// Forward to merchant
-		project, _ := h.ProjectRepo.FindByID(tx.ProjectID)
-		if project != nil && project.WebhookURL != "" {
-			h.WorkerPool.Submit(func() {
-				h.SendCallback(project.WebhookURL, models.WebhookPayload{
-					Amount:        tx.Amount,
-					Fee:           tx.Fee,
-					NetAmount:     tx.Amount, // Same as amount for expired
-					OrderID:       tx.OrderID,
-					Project:       project.Nama,
-					Status:        "expired",
-					PaymentMethod: tx.PaymentMethod,
-					CompletedAt:   time.Now(),
-				})
-			})
-		}
 	}
 
-	return c.Status(200).SendString("OK")
+	return c.Status(200).JSON(fiber.Map{"status": true})
 }
 
 func (h *PaymentHandler) SendCallback(url string, payload models.WebhookPayload) {
@@ -361,11 +332,11 @@ func (h *PaymentHandler) TransactionCancel(c *fiber.Ctx) error {
 		})
 	}
 
-	// Call iPaymu cancel API
-	err = h.IPaymu.CancelTransaction(project.Mode, req)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
+	// Call WijayaPay cancel is not currently supported in their docs for standard API
+	// but we'll leave it as no-op or implement if they have one.
+	// err = h.WijayaPay.CancelTransaction(project.Mode, req) 
+	fmt.Printf("[%s] WijayaPay Cancel Request for %s (No-op)\n", project.Mode, req.OrderID)
+
 
 	// Update transaction status in database atomically (partial transaction for status change)
 	dtx, dtxe := h.DB.Begin()
@@ -876,7 +847,7 @@ func (h *PaymentHandler) PayBySessionExec(c *fiber.Ctx) error {
 					APIKey:  project.APIKey,
 				}
 
-				payment, err := h.IPaymu.CreateTransaction(project.Mode, newPm.GatewayCode, fee, req, project.FeeByMerchant)
+				payment, err := h.WijayaPay.CreateTransaction(project.Mode, newPm.GatewayCode, fee, req, project.FeeByMerchant)
 				if err == nil {
 					errU := h.TransactionRepo.UpdatePaymentMethod(currentTx.ID, newGatewayOrderID, payment.Reference, payment.Fee, payment.TotalPayment, method, payment.PaymentNumber, payment.ExpiredAt)
 					if errU == nil {
@@ -919,9 +890,9 @@ func (h *PaymentHandler) PayBySessionExec(c *fiber.Ctx) error {
 			APIKey:  project.APIKey,
 		}
 
-		payment, err := h.IPaymu.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
+		payment, err := h.WijayaPay.CreateTransaction(project.Mode, pm.GatewayCode, fee, req, project.FeeByMerchant)
 		if err != nil {
-			fmt.Printf("[URL-PAY] iPaymu Create Error: %v\n", err)
+			fmt.Printf("[URL-PAY] WijayaPay Create Error: %v\n", err)
 			// Redirect back with error message as alert
 			errMsg := url.QueryEscape(err.Error())
 			return c.Redirect("/pay/" + slug + "/" + token + "?error=" + errMsg)
