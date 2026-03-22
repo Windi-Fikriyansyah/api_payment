@@ -23,7 +23,7 @@ func ConnectDB() *sql.DB {
 		port = "5432"
 	}
 
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=Asia/Jakarta",
 		host, port, user, password, dbname)
 
 	db, err := sql.Open("postgres", connStr)

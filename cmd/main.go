@@ -15,6 +15,9 @@ import (
 )
 
 func main() {
+	// Set Timezone to Asia/Jakarta
+	_ = os.Setenv("TZ", "Asia/Jakarta")
+
 	// Load .env file
 	_ = godotenv.Load()
 
