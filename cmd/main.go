@@ -45,6 +45,14 @@ func main() {
 		},
 	)
 
+	imageKitService := services.NewImageKitService(
+		services.ImageKitConfig{
+			PublicKey:   os.Getenv("IMAGEKIT_PUBLIC_KEY"),
+			PrivateKey:  os.Getenv("IMAGEKIT_PRIVATE_KEY"),
+			UrlEndpoint: os.Getenv("IMAGEKIT_URL_ENDPOINT"),
+		},
+	)
+
 	paymentHandler := handlers.NewPaymentHandler(
 		wijayapayService,
 		transactionRepo,
@@ -56,6 +64,7 @@ func main() {
 		workerPool,
 		emailService,
 		fonnteService,
+		imageKitService,
 		db,
 	)
 

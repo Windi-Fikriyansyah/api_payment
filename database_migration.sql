@@ -52,4 +52,14 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
 ALTER TABLE payment_sessions ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS no_whatsapp VARCHAR(20);
 
+-- 8. Tambahkan Column tampil_qris ke tabel projects
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS tampil_qris BOOLEAN DEFAULT FALSE;
+
+-- 9. Tambahkan Column is_active ke tabel project_payment_methods
+ALTER TABLE project_payment_methods ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+
+-- 10. Tambahkan QRIS URL dan FileId ke tabel transactions untuk ImageKit
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_url TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_file_id VARCHAR(255);
+
 -- Fonnte Webhook URL: [APP_URL]/webhook/fonnte

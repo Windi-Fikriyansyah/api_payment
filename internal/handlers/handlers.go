@@ -32,6 +32,7 @@ type PaymentHandler struct {
 	WorkerPool        *services.WorkerPool
 	EmailService      *services.EmailService
 	FonnteService     *services.FonnteService
+	ImageKitService   *services.ImageKitService
 	DB                *sql.DB
 }
 
@@ -46,6 +47,7 @@ func NewPaymentHandler(
 	workerPool *services.WorkerPool,
 	emailService *services.EmailService,
 	fonnteService *services.FonnteService,
+	imageKitService *services.ImageKitService,
 	db *sql.DB,
 ) *PaymentHandler {
 	return &PaymentHandler{
@@ -59,6 +61,7 @@ func NewPaymentHandler(
 		WorkerPool:        workerPool,
 		EmailService:      emailService,
 		FonnteService:     fonnteService,
+		ImageKitService:   imageKitService,
 		DB:                db,
 	}
 }
@@ -173,6 +176,15 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 			return c.Status(500).JSON(fiber.Map{"status": false})
 		}
 
+		// Delete QRIS from ImageKit if exists
+		if tx.QRISFileID != "" {
+			h.WorkerPool.Submit(func() {
+				if errIK := h.ImageKitService.DeleteFile(tx.QRISFileID); errIK != nil {
+					fmt.Printf("ImageKit Delete Error for %s: %v\n", tx.OrderID, errIK)
+				}
+			})
+		}
+
 		// Forward Callback asynchronously
 		project, _ := h.ProjectRepo.FindByID(tx.ProjectID)
 		if project != nil && project.WebhookURL != "" {
@@ -216,6 +228,15 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 				err := h.FonnteService.SendMessage(tx.WhatsappNumber, msg)
 				if err != nil {
 					fmt.Printf("WhatsApp Notification Error for %s: %v\n", tx.OrderID, err)
+				}
+			})
+		}
+	} else if !isSuccess && (payload.Status == "expired" || payload.Status == "failed") && tx.Status == "pending" {
+		h.TransactionRepo.UpdateStatus(tx.OrderID, tx.Reference, payload.Status)
+		if tx.QRISFileID != "" {
+			h.WorkerPool.Submit(func() {
+				if errIK := h.ImageKitService.DeleteFile(tx.QRISFileID); errIK != nil {
+					fmt.Printf("ImageKit Delete Error for %s: %v\n", tx.OrderID, errIK)
 				}
 			})
 		}
@@ -309,19 +330,84 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Internal error"})
 	}
 
+	// 3. CHECK IF TAMPIL QRIS AND QRIS ACTIVE
+	methods, _ := h.PaymentMethodRepo.GetByProjectID(project.ID)
+	var qrisMethod *models.PaymentMethod
+	for i := range methods {
+		if strings.ToUpper(methods[i].Code) == "QRIS" {
+			qrisMethod = &methods[i]
+			break
+		}
+	}
+
+	if project.TampilQRIS && qrisMethod != nil {
+		// Calculate Fee and Total
+		fee := qrisMethod.FeeFlat + (harga * qrisMethod.FeePercent)
+		gatewayOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+
+		payment, errP := h.WijayaPay.CreateTransaction(project.Mode, qrisMethod.GatewayCode, fee, models.TransactionRequest{
+			Project: project.Nama,
+			OrderID: gatewayOrderID,
+			Amount:  harga,
+		}, project.FeeByMerchant)
+
+		if errP == nil {
+			// Upload to ImageKit with .png extension
+			qrURL, qrisFileID, ikErr := h.ImageKitService.UploadQRIS(payment.PaymentNumber, orderID+".png")
+			if ikErr == nil {
+				// Create actual Transaction immediately
+				transaction := &models.Transaction{
+					ProjectID:      project.ID,
+					OrderID:        orderID,
+					GatewayOrderID: gatewayOrderID,
+					Reference:      payment.Reference,
+					Amount:         harga,
+					Fee:            payment.Fee,
+					TotalPayment:   payment.TotalPayment,
+					Status:         "pending",
+					Mode:           project.Mode,
+					PaymentMethod:  "qris",
+					PaymentNumber:  payment.PaymentNumber,
+					WhatsappNumber: payload.Sender,
+					BuyerName:      namaPembeli,
+					QRISURL:        qrURL,
+					QRISFileID:     qrisFileID,
+					ExpiredAt:      time.Now().Add(24 * time.Hour),
+				}
+				if errT := h.TransactionRepo.Create(transaction); errT == nil {
+					// Send message via Fonnte as text containing the URL (Link Preview)
+					replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah QRIS pembayaran Anda:\n💰 Nominal: Rp %s\n⏳ Expired dalam 24 Jam\n\n🔗 Buka gambar QRIS selengkapnya disini:\n%s",
+						namaPembeli, formatRupiah(harga), qrURL)
+					errF := h.FonnteService.SendMessage(payload.Sender, replyMessage)
+					if errF == nil {
+						fmt.Printf("[Fonnte Webhook] Berhasil kirim pesan URL QRIS ke %s\n", payload.Sender)
+						return c.Status(200).JSON(fiber.Map{"status": true})
+					}
+					fmt.Printf("[Fonnte Webhook] Gagal kirim pesan URL: %v\n", errF)
+				} else {
+					fmt.Printf("[Fonnte Webhook] Gagal simpan transaksi: %v\n", errT)
+				}
+			} else {
+				fmt.Printf("[Fonnte Webhook] Gagal upload ImageKit: %v\n", ikErr)
+			}
+		} else {
+			fmt.Printf("[Fonnte Webhook] Gagal create transaction di gateway: %v\n", errP)
+		}
+	}
+
+	// 4. FALLBACK: KIRIM BALIK LINK PEMBAYARAN KE MERCHANT (SENDER)
 	appURL := os.Getenv("APP_URL")
 	if appURL == "" {
 		appURL = c.BaseURL()
 	}
 	paymentURL := fmt.Sprintf("%s/pay/%s/%s", appURL, project.Slug, token)
 
-	// 3. KIRIM BALIK LINK PEMBAYARAN KE MERCHANT (SENDER)
 	replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah link pembayaran Anda:\n💰 Nominal: Rp %s\n🔗 Link Bayar: %s",
 		namaPembeli, formatRupiah(harga), paymentURL)
 
 	err = h.FonnteService.SendMessage(payload.Sender, replyMessage)
 	if err != nil {
-		fmt.Printf("[Fonnte Webhook] Gagal kirim balasan: %v\n", err)
+		fmt.Printf("[Fonnte Webhook] Gagal kirim balasan link: %v\n", err)
 	} else {
 		fmt.Printf("[Fonnte Webhook] Berhasil kirim link pembayaran ke %s\n", payload.Sender)
 	}

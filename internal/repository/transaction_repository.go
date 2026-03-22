@@ -15,10 +15,10 @@ func NewTransactionRepository(db *sql.DB) *TransactionRepository {
 }
 
 func (r *TransactionRepository) Create(t *models.Transaction) error {
-	query := `INSERT INTO transactions (project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, whatsapp_number, buyer_name, created_at, updated_at)
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()) RETURNING id, created_at`
+	query := `INSERT INTO transactions (project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, whatsapp_number, buyer_name, created_at, updated_at, qris_url, qris_file_id)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW(), $16, $17) RETURNING id, created_at`
 
-	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.GatewayOrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber, t.Jenis, t.ExpiredAt, t.WhatsappNumber, t.BuyerName).Scan(&t.ID, &t.CreatedAt)
+	return r.DB.QueryRow(query, t.ProjectID, t.OrderID, t.GatewayOrderID, t.Reference, t.Amount, t.Fee, t.TotalPayment, t.Status, t.Mode, t.PaymentMethod, t.PaymentNumber, t.Jenis, t.ExpiredAt, t.WhatsappNumber, t.BuyerName, t.QRISURL, t.QRISFileID).Scan(&t.ID, &t.CreatedAt)
 }
 
 func (r *TransactionRepository) UpdateStatusWithTx(tx *sql.Tx, orderID string, reference string, status string) error {
@@ -34,12 +34,12 @@ func (r *TransactionRepository) UpdateStatus(orderID string, reference string, s
 }
 
 func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name 
+	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name, qris_url, qris_file_id 
 	          FROM transactions WHERE order_id = $1 OR gateway_order_id = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName, &t.QRISURL, &t.QRISFileID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +47,12 @@ func (r *TransactionRepository) FindByOrderID(orderID string) (*models.Transacti
 }
 
 func (r *TransactionRepository) FindByOrderAndReference(orderID string, reference string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name 
+	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name, qris_url, qris_file_id 
 	          FROM transactions WHERE (order_id = $1 OR gateway_order_id = $1) AND reference = $2 LIMIT 1`
 
 	row := r.DB.QueryRow(query, orderID, reference)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName, &t.QRISURL, &t.QRISFileID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +75,12 @@ func (r *TransactionRepository) FindProjectByTransactionOrderAndReference(orderI
 }
 
 func (r *TransactionRepository) FindByProjectAndOrderID(projectID uint, orderID string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name 
+	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name, qris_url, qris_file_id 
 	          FROM transactions WHERE project_id = $1 AND (order_id = $2 OR gateway_order_id = $2) LIMIT 1`
 
 	row := r.DB.QueryRow(query, projectID, orderID)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName, &t.QRISURL, &t.QRISFileID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,14 +93,20 @@ func (r *TransactionRepository) UpdatePaymentMethod(id uint, gatewayOrderID stri
 }
 
 func (r *TransactionRepository) FindByReference(reference string) (*models.Transaction, error) {
-	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name 
+	query := `SELECT id, project_id, order_id, gateway_order_id, reference, amount, fee, total_payment, status, mode, payment_method, payment_number, jenis, expired_at, created_at, updated_at, whatsapp_number, buyer_name, qris_url, qris_file_id 
 	          FROM transactions WHERE reference = $1 LIMIT 1`
 
 	row := r.DB.QueryRow(query, reference)
 	var t models.Transaction
-	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.OrderID, &t.GatewayOrderID, &t.Reference, &t.Amount, &t.Fee, &t.TotalPayment, &t.Status, &t.Mode, &t.PaymentMethod, &t.PaymentNumber, &t.Jenis, &t.ExpiredAt, &t.CreatedAt, &t.UpdatedAt, &t.WhatsappNumber, &t.BuyerName, &t.QRISURL, &t.QRISFileID)
 	if err != nil {
 		return nil, err
 	}
 	return &t, nil
+}
+
+func (r *TransactionRepository) UpdateQRIS(orderID string, reference string, qrisURL string, qrisFileID string) error {
+	query := `UPDATE transactions SET qris_url = $1, qris_file_id = $2, updated_at = NOW() WHERE (order_id = $3 OR gateway_order_id = $3) AND reference = $4`
+	_, err := r.DB.Exec(query, qrisURL, qrisFileID, orderID, reference)
+	return err
 }

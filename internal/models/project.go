@@ -18,4 +18,5 @@ type Project struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	UserID         uint      `json:"user_id"`
 	NoWhatsApp     string    `json:"no_whatsapp"`
+	TampilQRIS     bool      `json:"tampil_qris"`
 }

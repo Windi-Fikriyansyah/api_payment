@@ -21,4 +21,6 @@ type Transaction struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	BuyerName      string    `json:"buyer_name"`
 	WhatsappNumber string    `json:"whatsapp_number"`
+	QRISURL        string    `json:"qris_url"`
+	QRISFileID     string    `json:"qris_file_id"`
 }

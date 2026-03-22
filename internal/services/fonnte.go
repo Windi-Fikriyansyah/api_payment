@@ -24,6 +24,7 @@ func NewFonnteService() *FonnteService {
 type FonnteSendRequest struct {
 	Target  string `json:"target"`
 	Message string `json:"message"`
+	Url     string `json:"url,omitempty"`
 	Template string `json:"template,omitempty"`
 }
 
@@ -31,6 +32,15 @@ func (s *FonnteService) SendMessage(target, message string) error {
 	payload := FonnteSendRequest{
 		Target:  target,
 		Message: message,
+	}
+	return s.doRequest("/send", payload)
+}
+
+func (s *FonnteService) SendImage(target, message, imageUrl string) error {
+	payload := FonnteSendRequest{
+		Target:  target,
+		Message: message,
+		Url:     imageUrl,
 	}
 	return s.doRequest("/send", payload)
 }
