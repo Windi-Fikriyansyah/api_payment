@@ -102,9 +102,43 @@ func (s *WijayaPayService) CreateTransaction(mode string, gatewayMethod string, 
 		return nil, fmt.Errorf("WijayaPay error: %s", wpayResp.Message)
 	}
 
-	paymentNumber := wpayResp.Data.VaNumber
+	// Get payment number from various possible fields (sometimes gateways change field names)
+	var dataMap map[string]interface{}
+	json.Unmarshal(respBody, &dataMap)
+	
+	paymentNumber := ""
+	if data, ok := dataMap["data"].(map[string]interface{}); ok {
+		// Priority for VA
+		keys := []string{
+			"va_number", "va_no", "nomor_va", "pay_no", "payment_no", 
+			"account_number", "bank_number", "customer_number", "bill_no",
+			"qr_string", "qr_data", "qr_content", "payment_code",
+		}
+		
+		for _, key := range keys {
+			if v, ok := data[key].(string); ok && v != "" {
+				paymentNumber = v
+				break
+			}
+		}
+
+		if paymentNumber == "" {
+			if v, ok := data["payment_url"].(string); ok && v != "" {
+				paymentNumber = v
+			} else if v, ok := data["checkout_url"].(string); ok && v != "" {
+				paymentNumber = v
+			} else if v, ok := data["pay_url"].(string); ok && v != "" {
+				paymentNumber = v
+			}
+		}
+	}
+	
+	// Fallback to struct if map parsing failed for some reason
 	if paymentNumber == "" {
-		paymentNumber = wpayResp.Data.QrString
+		paymentNumber = wpayResp.Data.VaNumber
+		if paymentNumber == "" {
+			paymentNumber = wpayResp.Data.QrString
+		}
 	}
 
 	return &models.PaymentDetail{
