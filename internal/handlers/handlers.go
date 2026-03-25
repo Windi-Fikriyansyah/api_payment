@@ -32,6 +32,7 @@ type PaymentHandler struct {
 	WorkerPool        *services.WorkerPool
 	EmailService      *services.EmailService
 	FonnteService     *services.FonnteService
+	KirimiService     *services.KirimiService
 	ImageKitService   *services.ImageKitService
 	DB                *sql.DB
 }
@@ -47,6 +48,7 @@ func NewPaymentHandler(
 	workerPool *services.WorkerPool,
 	emailService *services.EmailService,
 	fonnteService *services.FonnteService,
+	kirimiService *services.KirimiService,
 	imageKitService *services.ImageKitService,
 	db *sql.DB,
 ) *PaymentHandler {
@@ -61,6 +63,7 @@ func NewPaymentHandler(
 		WorkerPool:        workerPool,
 		EmailService:      emailService,
 		FonnteService:     fonnteService,
+		KirimiService:     kirimiService,
 		ImageKitService:   imageKitService,
 		DB:                db,
 	}
@@ -225,7 +228,7 @@ func (h *PaymentHandler) WijayaPayWebhook(c *fiber.Ctx) error {
 				}
 				msg := fmt.Sprintf("✅ *Pembayaran Berhasil!*\n\nOrder ID: %s%s\nNominal: Rp %s\nStatus: Terbayar\n\nTerima kasih telah melakukan pembayaran.\n\n1️⃣ *Buat Pesanan*\n2️⃣ *Cek Saldo*",
 					tx.OrderID, atasNama, formatRupiah(tx.Amount))
-				err := h.FonnteService.SendMessage(tx.WhatsappNumber, msg)
+				err := h.KirimiService.SendMessage(tx.WhatsappNumber, msg)
 				if err != nil {
 					fmt.Printf("WhatsApp Notification Error for %s: %v\n", tx.OrderID, err)
 				}
@@ -262,30 +265,36 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 
 	fmt.Printf("[Fonnte Webhook Masuk] Pengirim: %s | Bot: %s | Pesan: %s\n", payload.Sender, payload.Receiver, payload.Message)
 
+	return h.processIncomingWhatsApp(c, payload.Sender, payload.Message, "Fonnte")
+}
+
+// processIncomingWhatsApp adalah logika bersama untuk memproses pesan WA masuk.
+// Webhook dari Fonnte, balasan dikirim via Kirimi.
+func (h *PaymentHandler) processIncomingWhatsApp(c *fiber.Ctx, sender, message, source string) error {
 	// Handle Auto-Reply berbasis Angka
-	cleanMsg := strings.TrimSpace(payload.Message)
+	cleanMsg := strings.TrimSpace(message)
 	if cleanMsg == "1" {
-		h.FonnteService.SendMessage(payload.Sender, "📝 *Buat Pesanan*\nSilakan gunakan format: Namapembeli#Harga")
+		h.KirimiService.SendMessage(sender, "📝 *Buat Pesanan*\nSilakan gunakan format: Namapembeli#Harga")
 		return c.Status(200).JSON(fiber.Map{"status": true})
 	}
 	if cleanMsg == "2" {
-		project, err := h.ProjectRepo.FindByNoWhatsApp(payload.Sender)
+		project, err := h.ProjectRepo.FindByNoWhatsApp(sender)
 		if err == nil {
 			balance, errB := h.ProjectRepo.CalculateBalance(project.ID, project.Mode)
 			if errB == nil {
-				h.FonnteService.SendMessage(payload.Sender, fmt.Sprintf("💰 *Total Saldo (Mode: %s)*\nProject: %s\n\nSaldo Anda: *Rp %s*",
+				h.KirimiService.SendMessage(sender, fmt.Sprintf("💰 *Total Saldo (Mode: %s)*\nProject: %s\n\nSaldo Anda: *Rp %s*",
 					project.Mode, project.Nama, formatRupiah(balance)))
 			} else {
-				h.FonnteService.SendMessage(payload.Sender, "⚠️ Gagal mengambil saldo: "+errB.Error())
+				h.KirimiService.SendMessage(sender, "⚠️ Gagal mengambil saldo: "+errB.Error())
 			}
 		} else {
-			h.FonnteService.SendMessage(payload.Sender, "⚠️ Maaf, nomor Anda tidak terdaftar.")
+			h.KirimiService.SendMessage(sender, "⚠️ Maaf, nomor Anda tidak terdaftar.")
 		}
 		return c.Status(200).JSON(fiber.Map{"status": true})
 	}
 
 	// Format: namapembeli#harga
-	parts := strings.Split(payload.Message, "#")
+	parts := strings.Split(message, "#")
 	if len(parts) != 2 {
 		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Format salah. Gunakan namapembeli#harga atau pilih menu (1/2)"})
 	}
@@ -300,14 +309,14 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 	}
 
 	// 1. CARI PROJECT BERDASARKAN NOMOR PENGIRIM (SENDER)
-	project, err := h.ProjectRepo.FindByNoWhatsApp(payload.Sender)
+	project, err := h.ProjectRepo.FindByNoWhatsApp(sender)
 	if err != nil {
-		fmt.Printf("[Fonnte Webhook] Nomor pengirim %s TIDAK TERDAFTAR di database.\n", payload.Sender)
-		h.FonnteService.SendMessage(payload.Sender, "⚠️ Maaf, nomor WhatsApp Anda ("+payload.Sender+") tidak terdaftar sebagai pemilik proyek.\n\nSilakan daftarkan proyek Anda di sini: https://linkbayar.my.id")
+		fmt.Printf("[%s Webhook] Nomor pengirim %s TIDAK TERDAFTAR di database.\n", source, sender)
+		h.KirimiService.SendMessage(sender, "⚠️ Maaf, nomor WhatsApp Anda ("+sender+") tidak terdaftar sebagai pemilik proyek.\n\nSilakan daftarkan proyek Anda di sini: https://linkbayar.my.id")
 		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Sender not registered"})
 	}
 
-	fmt.Printf("[Fonnte Webhook] Merchant Ditemukan: %s (Project: %s)\n", payload.Sender, project.Nama)
+	fmt.Printf("[%s Webhook] Merchant Ditemukan: %s (Project: %s)\n", source, sender, project.Nama)
 
 	// 2. LANJUT BUAT SESSION TRANSAKSI
 	b := make([]byte, 16)
@@ -322,28 +331,26 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 		OrderID:        orderID,
 		ExpiredAt:      time.Now().Add(1 * time.Hour),
 		BuyerName:      namaPembeli,
-		WhatsappNumber: payload.Sender,
+		WhatsappNumber: sender,
 	}
 
 	if err := h.SessionRepo.Create(session); err != nil {
-		fmt.Printf("[Fonnte Webhook] Error DB: %v\n", err)
+		fmt.Printf("[%s Webhook] Error DB: %v\n", source, err)
 		return c.Status(200).JSON(fiber.Map{"status": true, "message": "Internal error"})
 	}
 
 	// 3. CHECK IF TAMPIL QRIS AND QRIS ACTIVE
-	methods, _ := h.PaymentMethodRepo.GetByProjectID(project.ID)
 	var qrisMethod *models.PaymentMethod
-	for i := range methods {
-		if strings.ToUpper(methods[i].Code) == "QRIS" {
-			qrisMethod = &methods[i]
-			break
-		}
-	}
+	qrisMethod, errPM := h.PaymentMethodRepo.FindByCode("qris")
+	
+	fmt.Printf("[%s Webhook] TampilQRIS: %v | QRIS Method DB Found: %v (err: %v)\n", source, project.TampilQRIS, qrisMethod != nil, errPM)
 
 	if project.TampilQRIS && qrisMethod != nil {
 		// Calculate Fee and Total
 		fee := qrisMethod.FeeFlat + (harga * qrisMethod.FeePercent)
 		gatewayOrderID := fmt.Sprintf("P%d-%s", project.ID, orderID)
+
+		fmt.Printf("[%s Webhook] Membuat transaksi QRIS di gateway... (GatewayCode: %s, Fee: %.2f)\n", source, qrisMethod.GatewayCode, fee)
 
 		payment, errP := h.WijayaPay.CreateTransaction(project.Mode, qrisMethod.GatewayCode, fee, models.TransactionRequest{
 			Project: project.Nama,
@@ -352,9 +359,11 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 		}, project.FeeByMerchant)
 
 		if errP == nil {
+			fmt.Printf("[%s Webhook] Transaksi gateway berhasil, upload QRIS ke ImageKit...\n", source)
 			// Upload to ImageKit with .png extension
 			qrURL, qrisFileID, ikErr := h.ImageKitService.UploadQRIS(payment.PaymentNumber, orderID+".png")
 			if ikErr == nil {
+				fmt.Printf("[%s Webhook] ImageKit upload berhasil: %s\n", source, qrURL)
 				// Create actual Transaction immediately
 				transaction := &models.Transaction{
 					ProjectID:      project.ID,
@@ -368,31 +377,34 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 					Mode:           project.Mode,
 					PaymentMethod:  "qris",
 					PaymentNumber:  payment.PaymentNumber,
-					WhatsappNumber: payload.Sender,
+					WhatsappNumber: sender,
 					BuyerName:      namaPembeli,
 					QRISURL:        qrURL,
 					QRISFileID:     qrisFileID,
 					ExpiredAt:      time.Now().Add(24 * time.Hour),
 				}
 				if errT := h.TransactionRepo.Create(transaction); errT == nil {
-					// Send message via Fonnte as text containing the URL (Link Preview)
-					replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah QRIS pembayaran Anda:\n💰 Nominal: Rp %s\n⏳ Expired dalam 24 Jam\n\n🔗 Buka gambar QRIS selengkapnya disini:\n%s",
-						namaPembeli, formatRupiah(harga), qrURL)
-					errF := h.FonnteService.SendMessage(payload.Sender, replyMessage)
+					// Send QRIS image via Kirimi directly
+					replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah QRIS pembayaran Anda:\n💰 Nominal: Rp %s\n⏳ Expired dalam 24 Jam",
+						namaPembeli, formatRupiah(harga))
+					errF := h.KirimiService.SendImage(sender, replyMessage, qrURL)
 					if errF == nil {
-						fmt.Printf("[Fonnte Webhook] Berhasil kirim pesan URL QRIS ke %s\n", payload.Sender)
+						fmt.Printf("[%s Webhook] Berhasil kirim pesan URL QRIS ke %s\n", source, sender)
 						return c.Status(200).JSON(fiber.Map{"status": true})
 					}
-					fmt.Printf("[Fonnte Webhook] Gagal kirim pesan URL: %v\n", errF)
+					fmt.Printf("[%s Webhook] Gagal kirim pesan URL: %v\n", source, errF)
 				} else {
-					fmt.Printf("[Fonnte Webhook] Gagal simpan transaksi: %v\n", errT)
+					fmt.Printf("[%s Webhook] Gagal simpan transaksi: %v\n", source, errT)
 				}
 			} else {
-				fmt.Printf("[Fonnte Webhook] Gagal upload ImageKit: %v\n", ikErr)
+				fmt.Printf("[%s Webhook] Gagal upload ImageKit: %v\n", source, ikErr)
 			}
 		} else {
-			fmt.Printf("[Fonnte Webhook] Gagal create transaction di gateway: %v\n", errP)
+			fmt.Printf("[%s Webhook] Gagal create transaction di gateway: %v\n", source, errP)
 		}
+
+		// Jika sampai sini berarti QRIS gagal, lanjut ke fallback
+		fmt.Printf("[%s Webhook] QRIS flow gagal, fallback ke link pembayaran\n", source)
 	}
 
 	// 4. FALLBACK: KIRIM BALIK LINK PEMBAYARAN KE MERCHANT (SENDER)
@@ -405,11 +417,11 @@ func (h *PaymentHandler) FonnteWebhook(c *fiber.Ctx) error {
 	replyMessage := fmt.Sprintf("Tagihan Pembayaran 💳\n\nYth. %s, berikut adalah link pembayaran Anda:\n💰 Nominal: Rp %s\n🔗 Link Bayar: %s",
 		namaPembeli, formatRupiah(harga), paymentURL)
 
-	err = h.FonnteService.SendMessage(payload.Sender, replyMessage)
+	err = h.KirimiService.SendMessage(sender, replyMessage)
 	if err != nil {
-		fmt.Printf("[Fonnte Webhook] Gagal kirim balasan link: %v\n", err)
+		fmt.Printf("[%s Webhook] Gagal kirim balasan link: %v\n", source, err)
 	} else {
-		fmt.Printf("[Fonnte Webhook] Berhasil kirim link pembayaran ke %s\n", payload.Sender)
+		fmt.Printf("[%s Webhook] Berhasil kirim link pembayaran ke %s\n", source, sender)
 	}
 
 	return c.Status(200).JSON(fiber.Map{"status": true})
@@ -514,7 +526,7 @@ func (h *PaymentHandler) PaymentSimulation(c *fiber.Ctx) error {
 			}
 			msg := fmt.Sprintf("✅ *Pembayaran Berhasil (Simulasi)!*\n\nOrder ID: %s%s\nNominal: Rp %s\nStatus: Terbayar\n\nTerima kasih telah melakukan pembayaran.\n\n1️⃣ *Buat Pesanan*\n2️⃣ *Cek Saldo*",
 				tx.OrderID, atasNama, formatRupiah(tx.Amount))
-			err := h.FonnteService.SendMessage(tx.WhatsappNumber, msg)
+			err := h.KirimiService.SendMessage(tx.WhatsappNumber, msg)
 			if err != nil {
 				fmt.Printf("WhatsApp Notification Error for %s: %v\n", tx.OrderID, err)
 			}

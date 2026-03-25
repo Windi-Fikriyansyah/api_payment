@@ -38,6 +38,7 @@ func main() {
 
 	emailService := services.NewEmailService()
 	fonnteService := services.NewFonnteService()
+	kirimiService := services.NewKirimiService()
 
 	wijayapayService := services.NewWijayaPayService(
 		services.WijayaPayConfig{
@@ -67,6 +68,7 @@ func main() {
 		workerPool,
 		emailService,
 		fonnteService,
+		kirimiService,
 		imageKitService,
 		db,
 	)
@@ -101,7 +103,7 @@ func main() {
 	// Webhook from WijayaPay
 	app.Post("/webhook/wijayapay", paymentHandler.WijayaPayWebhook)
 
-	// Webhook from Fonnte
+	// Webhook from Fonnte (menerima pesan masuk, balasan dikirim via Kirimi)
 	app.Post("/webhook/fonnte", paymentHandler.FonnteWebhook)
 
 	// URL-based Integration (Integrasi Via URL - SESSION BASED)
